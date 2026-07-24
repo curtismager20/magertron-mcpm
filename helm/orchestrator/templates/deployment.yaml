@@ -309,6 +309,47 @@ spec:
             # only when the probe SA really does live in the default org.
             - name: MCP_DRIFT_PROBE_SA_ORG_ID
               value: {{ .Values.drift.probe.saOrgId | quote }}
+            # ── Probe cadence ────────────────────────────────────────────
+            # How often each KIND of governed surface is re-introspected.
+            #
+            # These probes CALL THIRD-PARTY VENDORS. Every value here is a
+            # request rate against an API whose limits and billing you do not
+            # control: 60s means ~1,440 requests per vendor per day, forever,
+            # from a control whose whole value is being cheap and unobtrusive.
+            #
+            # Unset falls back to the binary's PollPolicy{} defaults, which are
+            # the same production values the chart ships (1h external, 24h
+            # internal/LLM). That direction of default is deliberate — a
+            # misconfigured cluster probing too RARELY is a visibility problem
+            # you notice, while one probing too often is a problem the vendor
+            # notices.
+            #
+            # Set these low ONLY on a dev cluster watching the pipeline work.
+            # See values.yaml drift.cadence for the override block; it replaces
+            # a hardcoded testing_fast_policy() that used to live in the
+            # worker's constructor behind a revert-before-shipping comment.
+            - name: MCP_DRIFT_EXTERNAL_MCP_BASE_SEC
+              value: {{ .Values.drift.cadence.externalMcpBaseSec | quote }}
+            - name: MCP_DRIFT_REST_API_BASE_SEC
+              value: {{ .Values.drift.cadence.restApiBaseSec | quote }}
+            - name: MCP_DRIFT_INTERNAL_MCP_BASE_SEC
+              value: {{ .Values.drift.cadence.internalMcpBaseSec | quote }}
+            - name: MCP_DRIFT_LLM_BASE_SEC
+              value: {{ .Values.drift.cadence.llmBaseSec | quote }}
+            # Floor and ceiling after adaptive tightening/backoff. The floor is
+            # the real protection against a pathological config: no combination
+            # of risk tier and post-drift tightening can probe a vendor more
+            # often than this.
+            - name: MCP_DRIFT_MIN_INTERVAL_SEC
+              value: {{ .Values.drift.cadence.minIntervalSec | quote }}
+            - name: MCP_DRIFT_MAX_INTERVAL_SEC
+              value: {{ .Values.drift.cadence.maxIntervalSec | quote }}
+            # ±fraction of spread on each server's next-due time, so a fleet
+            # registered together does not come due together. 0 is legitimate
+            # (predictable timing on a test cluster); in any real deployment
+            # the spread is what prevents a thundering herd at a shared vendor.
+            - name: MCP_DRIFT_JITTER_FRACTION
+              value: {{ .Values.drift.cadence.jitterFraction | quote }}
             # Server Editor Assistant — advisory bot needs the Anthropic key to
             # call the Messages API. Same key/secret the chat-daemon uses (see
             # the chat-daemon container below): honors chatDaemon.externalSecretName

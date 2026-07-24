@@ -1416,6 +1416,45 @@ drift:
     # the setting stops being a decision anyone has to make.
     saOrgId: "549bf42a-060b-4eb4-adf3-6d72d43464f9"
 
+  # ── Probe cadence ──────────────────────────────────────────────────────────
+  # How often each KIND of governed surface is re-introspected, in seconds.
+  #
+  # These probes CALL THIRD-PARTY VENDORS. Every interval here is a request
+  # rate against an API whose limits you do not control and may be billed for:
+  # 60s means ~1,440 requests per vendor per day, forever, from a control whose
+  # entire value proposition is being cheap and unobtrusive. Lower these
+  # deliberately, never "to be safe".
+  #
+  # Defaults below are the production values compiled into PollPolicy, restated
+  # here so a deployment's cadence is visible in its values file rather than
+  # only in the source — which is how a hardcoded one-minute testing policy once
+  # stayed live in a build without anyone noticing.
+  #
+  # Kinds differ because exposure differs: external MCP and REST surfaces are
+  # third-party and change without warning (the rug-pull threat model); internal
+  # servers change when YOU deploy them, an event you already observe; LLM
+  # catalogs move on vendor release cycles, and deprecations are announced well
+  # in advance.
+  #
+  # Dev/demo override — collapse everything to ~1 minute to watch the pipeline:
+  #   externalMcpBaseSec: 60, restApiBaseSec: 60, internalMcpBaseSec: 60,
+  #   llmBaseSec: 60, minIntervalSec: 30, jitterFraction: 0
+  cadence:
+    externalMcpBaseSec: 3600     # 1h  — external MCP servers
+    restApiBaseSec: 3600         # 1h  — outbound REST surfaces
+    internalMcpBaseSec: 86400    # 24h — in-cluster MCP servers
+    llmBaseSec: 86400            # 24h — LLM model catalogs
+    # Floor and ceiling after adaptive tightening/backoff. The floor is the real
+    # protection against a pathological config: no combination of risk tier and
+    # post-drift tightening can probe a vendor more often than this.
+    minIntervalSec: 300          # 5m
+    maxIntervalSec: 86400        # 24h
+    # ±spread on next-due so a fleet registered together doesn't come due
+    # together. 0 is legitimate for predictable test timing; in production the
+    # spread is what prevents a thundering herd at a shared vendor.
+    jitterFraction: 0.15
+
+
 # Probo runs as an INTERNAL Magertron subsystem — deployed alongside the
 # orchestrator and registered as a type:internal MCP server so the 270+ Probo
 # GRC tools flow through ext_authz / RBAC / rating / audit like any server. It is
