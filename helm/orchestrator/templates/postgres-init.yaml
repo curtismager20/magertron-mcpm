@@ -944,6 +944,108 @@ data:
     CREATE INDEX IF NOT EXISTS idx_external_user_tokens_principal
         ON external_user_tokens (principal_kind, principal_id);
 
+    -- ══════════════════════════════════════════════════════════════════════════
+    -- Unity Catalog — data-object governance (securable tree + grants)
+    -- ══════════════════════════════════════════════════════════════════════════
+    -- Governs catalog → schema → table access through the SAME RBAC engine and
+    -- the SAME audit trail (audit_events, plane='caller') as MCP tool access.
+    -- Lives in this one canonical schema file, in the shared mcp_platform DB, by
+    -- design: UC grants reference principals (users/groups/service accounts) by
+    -- the same string convention mcp_tool_permissions uses, and vend decisions
+    -- write to audit_events — neither works across a database boundary.
+    --
+    -- Naming: uc_ prefix (not a separate Postgres schema) to stay consistent with
+    -- the all-public, unqualified table convention used everywhere above.
+    --
+    -- Idempotent like the rest of this file: CREATE TABLE IF NOT EXISTS +
+    -- ALTER TABLE ADD COLUMN IF NOT EXISTS, safe on reinstall/upgrade.
+
+    -- ── Securable (one node of the catalog→schema→table tree) ───────────────────
+    -- parent_id is the ONLY structural link. A NULL parent = a catalog (top of
+    -- the tree). owner_id is set at create and NEVER inherited (Fact A). Leaf
+    -- metadata (storage_url / data_format) is NULL on containers.
+    --
+    -- owner_id / principals are TEXT by CONVENTION, not FK: a principal may be a
+    -- user ("user:<sub>"), a group ("group:<name>"), or a service account —
+    -- there is no single table to reference, exactly as mcp_tool_permissions
+    -- matches role ids by string. FK-ing owner_id to users(id) would break for
+    -- group- and SA-owned securables.
+    CREATE TABLE IF NOT EXISTS uc_securable (
+        id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        -- 'catalog' | 'schema' | 'table' | 'volume' | 'function'
+        type          VARCHAR(16) NOT NULL
+                      CHECK (type IN ('catalog','schema','table','volume','function')),
+        -- Self-referential parent. NULL only for catalogs. ON DELETE CASCADE:
+        -- deleting a container removes its subtree. This is pure access-control
+        -- metadata (NOT financial records) so cascading is correct here — unlike
+        -- meter_events/cost_contracts, which must outlive their servers.
+        parent_id     UUID        REFERENCES uc_securable(id) ON DELETE CASCADE,
+        -- Leaf/relative name (e.g. "orders"), NOT the 3-part path. Unique within
+        -- a parent so "sales.public.orders" and "hr.public.orders" coexist.
+        name          VARCHAR(255) NOT NULL,
+        owner_id      TEXT        NOT NULL,        -- Fact A: never inherited
+        -- Leaf-only. NULL on containers. storage_url is the target a credential
+        -- vend is scoped to (e.g. s3://bucket/sales/public/orders).
+        storage_url   TEXT,
+        data_format   VARCHAR(16)
+                      CHECK (data_format IS NULL OR
+                             data_format IN ('DELTA','PARQUET','ICEBERG')),
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- A catalog has a globally-unique name (parent_id IS NULL); a child's name is
+    -- unique within its parent. Two partial unique indexes express both without
+    -- a nullable-column composite-unique surprise (NULLs are distinct in a plain
+    -- UNIQUE, which would wrongly allow duplicate catalog names).
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_securable_root_name_idx
+        ON uc_securable (name) WHERE parent_id IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_securable_child_name_idx
+        ON uc_securable (parent_id, name) WHERE parent_id IS NOT NULL;
+    -- Parent lookups drive path_to_root; index the FK column.
+    CREATE INDEX IF NOT EXISTS uc_securable_parent_idx
+        ON uc_securable (parent_id);
+
+    -- ── Grant (one privilege for one principal on one securable) ────────────────
+    -- Modeled on mcp_tool_permissions: allow rows with an explicit-deny escape
+    -- hatch (deny wins). Inheritance is NOT stored — never materialized onto
+    -- children — it is resolved at check time by the C++ resolver walking parents
+    -- (uc_securable.cpp::can). Storing inherited rows would mean a table created
+    -- after a catalog-wide GRANT silently misses it.
+    --
+    -- privilege is a string matching the UcPrivilege enum tokens the hook parses:
+    --   use_catalog | use_schema | select | modify | create | manage |
+    --   external_use_schema | browse
+    -- external_use_schema is the credential-vending gate and, per the resolver,
+    -- is the one privilege that does NOT inherit downward.
+    CREATE TABLE IF NOT EXISTS uc_grant (
+        id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        securable_id  UUID        NOT NULL
+                      REFERENCES uc_securable(id) ON DELETE CASCADE,
+        -- Principal by convention: "user:<sub>", "group:<name>", or a service
+        -- account subject. TEXT, not FK (see uc_securable.owner_id rationale).
+        principal_id  TEXT        NOT NULL,
+        privilege     VARCHAR(32) NOT NULL
+                      CHECK (privilege IN ('use_catalog','use_schema','select',
+                                           'modify','create','manage',
+                                           'external_use_schema','browse')),
+        -- Explicit deny wins over allow, matching mcp_tool_permissions'
+        -- denied_role_ids semantics. FALSE = an allow grant.
+        deny          BOOLEAN     NOT NULL DEFAULT FALSE,
+        granted_by    TEXT,                              -- audit: who granted it
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- One row per (securable, principal, privilege): a re-grant flips allow↔deny
+    -- rather than stacking duplicates (matches UcSecurableStore::add_grant).
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_grant_unique_idx
+        ON uc_grant (securable_id, principal_id, privilege);
+    -- Resolution walks grants for a securable; index the lookup column.
+    CREATE INDEX IF NOT EXISTS uc_grant_securable_idx
+        ON uc_grant (securable_id);
+    -- "What does this principal hold" (admin UI / access review).
+    CREATE INDEX IF NOT EXISTS uc_grant_principal_idx
+        ON uc_grant (principal_id);
   02-cost-metering.sql: |
     -- ════════════════════════════════════════════════════════════════════════
     -- Magertron Cost Metering & Contract Rating (v1)
