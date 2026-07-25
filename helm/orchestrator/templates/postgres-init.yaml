@@ -1046,6 +1046,62 @@ data:
     -- "What does this principal hold" (admin UI / access review).
     CREATE INDEX IF NOT EXISTS uc_grant_principal_idx
         ON uc_grant (principal_id);
+
+    -- ── Multi-tenancy: namespace confinement ────────────────────────────────────
+    -- Magertron is namespace-multi-tenanted; UC securables must be too. This
+    -- column does exactly ONE job: which tenant owns this node. It is NOT a
+    -- permission scope and nothing in the resolver may read it to decide a
+    -- privilege. That separation is the direct lesson of the
+    -- permission.namespace overload bug, where one field served as both RBAC
+    -- guard and tenancy confinement; decoupling them was the fix. Privilege
+    -- resolution answers "may this principal do this verb here"; confinement
+    -- answers "is this node visible to this tenant at all". Evaluated
+    -- independently, both must pass. (uc_securable.cpp: GATE 1 / GATE 2.)
+    ALTER TABLE uc_securable
+        ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT 'default';
+
+    -- Catalog names are unique PER NAMESPACE, not globally. The index created
+    -- above makes them global, which collides the first time two tenants each
+    -- create a catalog called "sales". Replace it.
+    DROP INDEX IF EXISTS uc_securable_root_name_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_securable_root_name_idx
+        ON uc_securable (namespace, name) WHERE parent_id IS NULL;
+
+    -- Child-name uniqueness is unchanged: parent_id already scopes it, and the
+    -- composite FK below guarantees the parent shares this namespace.
+
+    -- Cross-namespace subtree guard, enforced by the database rather than by
+    -- application discipline. Making (id, namespace) unique lets the parent FK
+    -- carry the namespace, so a child physically cannot reference a parent in
+    -- another tenant. Without it, one bad INSERT hangs a table in tenant A off
+    -- a schema in tenant B and every ancestor walk crosses the boundary.
+    --
+    -- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so each is dropped first to
+    -- keep this file re-runnable — the idempotency contract the rest of this
+    -- schema relies on.
+    ALTER TABLE uc_securable
+        DROP CONSTRAINT IF EXISTS uc_securable_parent_id_fkey;
+    ALTER TABLE uc_securable
+        DROP CONSTRAINT IF EXISTS uc_securable_parent_ns_fkey;
+    ALTER TABLE uc_securable
+        DROP CONSTRAINT IF EXISTS uc_securable_id_ns_key;
+
+    ALTER TABLE uc_securable
+        ADD  CONSTRAINT uc_securable_id_ns_key UNIQUE (id, namespace);
+    ALTER TABLE uc_securable
+        ADD  CONSTRAINT uc_securable_parent_ns_fkey
+             FOREIGN KEY (parent_id, namespace)
+             REFERENCES  uc_securable (id, namespace) ON DELETE CASCADE;
+
+    -- Tenant-scoped listing is the hot query for the admin UI and access review.
+    CREATE INDEX IF NOT EXISTS uc_securable_namespace_idx
+        ON uc_securable (namespace);
+
+    -- Deliberately NOT added to uc_grant. A grant's namespace is the namespace
+    -- of the securable it points at; denormalizing it onto the grant row makes
+    -- two sources of truth that can diverge — the same failure shape this
+    -- section exists to avoid. Tenant-scoped grant queries join through
+    -- uc_securable.
   02-cost-metering.sql: |
     -- ════════════════════════════════════════════════════════════════════════
     -- Magertron Cost Metering & Contract Rating (v1)
