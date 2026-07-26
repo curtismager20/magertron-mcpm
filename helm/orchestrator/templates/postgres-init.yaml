@@ -1197,9 +1197,27 @@ data:
     CREATE TABLE IF NOT EXISTS uc_warehouse_config (
         server_id        UUID PRIMARY KEY
                          REFERENCES deployed_servers(id) ON DELETE CASCADE,
-        vendor           VARCHAR(32) NOT NULL
-                         CHECK (vendor IN ('bigquery','snowflake','databricks',
-                                           'redshift','postgres','other')),
+
+        -- WHAT KIND of system sits behind this endpoint. A type discriminator,
+        -- not a billing entity: it decides which unit to expect, whether usage
+        -- is observable at all, and where in the response to find it.
+        --
+        -- Deliberately not called 'vendor'. Nobody invoices you for an internal
+        -- Postgres, yet 'postgres' is a legal value here — so the field cannot
+        -- be about who bills you. Who bills you already lives in
+        -- cost_contracts, per server. Three BigQuery projects are three
+        -- connections and one Google contract; conflating the two would break
+        -- the first time a customer has two Snowflake accounts on separate
+        -- agreements.
+        --
+        -- The name also happens to match Unity Catalog's own vocabulary, where
+        -- a Connection is a credentialed pointer at an external system whose
+        -- foreign catalog is then governed like a native one. That is a bonus
+        -- rather than the reason.
+        connection_type  VARCHAR(32) NOT NULL
+                         CHECK (connection_type IN ('bigquery','snowflake',
+                                                    'databricks','redshift',
+                                                    'postgres','other')),
 
         -- NULL means this warehouse reports nothing meterable — an internal
         -- Postgres, an on-prem cluster. Those are governed and audited, never
@@ -1225,14 +1243,18 @@ data:
         -- Config rather than code, so a vendor changing its response shape is a
         -- row update instead of a release.
         usage_json_path  TEXT,
-        vendor_project   VARCHAR(255),
-        vendor_account   VARCHAR(255),
+
+        -- Upstream identifiers, used to build the query URL and to reconcile
+        -- against the provider's own usage view. Named for the connection, not
+        -- for a vendor, for the same reason as above.
+        connection_project VARCHAR(255),
+        connection_account VARCHAR(255),
         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS uc_warehouse_config_vendor_idx
-        ON uc_warehouse_config (vendor);
+    CREATE INDEX IF NOT EXISTS uc_warehouse_config_connection_type_idx
+        ON uc_warehouse_config (connection_type);
   02-cost-metering.sql: |
     -- ════════════════════════════════════════════════════════════════════════
     -- Magertron Cost Metering & Contract Rating (v1)
