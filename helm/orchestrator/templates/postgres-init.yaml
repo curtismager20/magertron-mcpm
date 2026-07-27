@@ -1106,6 +1106,91 @@ data:
         AFTER INSERT OR UPDATE OR DELETE ON uc_grant
         FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
 
+    -- ── Catalog ingest ───────────────────────────────────────────────────
+    -- Where an object graph comes FROM.
+    --
+    -- A customer with thirty thousand tables does not create them through
+    -- POST /catalogs one at a time. Their catalog already exists — in
+    -- Databricks Unity Catalog, in Snowflake's information_schema, in Glue —
+    -- and Magertron has to READ it rather than have it retyped. Without this
+    -- there is no onboarding path at all for a real estate, and no amount of
+    -- UI work changes that.
+    CREATE TABLE IF NOT EXISTS uc_catalog_source (
+        id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+        namespace     TEXT         NOT NULL,
+        name          VARCHAR(255) NOT NULL,
+        source_type   VARCHAR(32)  NOT NULL
+                      CHECK (source_type IN ('unity_catalog','snowflake',
+                                             'bigquery','glue','manual')),
+        -- Where to reach it. Credentials are NOT here: they live in the
+        -- existing BYOK store keyed on credential_ref, so a catalog source
+        -- cannot become a second place secrets accumulate.
+        endpoint_url   TEXT,
+        credential_ref TEXT,
+        -- Which slice to pull. A customer will not want their entire Snowflake
+        -- account mirrored on day one, and the first sync is where an
+        -- overbroad scope hurts most.
+        include_filter TEXT,
+        sync_interval_seconds INTEGER NOT NULL DEFAULT 3600
+                              CHECK (sync_interval_seconds >= 60),
+        enabled       BOOLEAN      NOT NULL DEFAULT TRUE,
+        last_sync_at      TIMESTAMPTZ,
+        last_sync_status  VARCHAR(16)
+                          CHECK (last_sync_status IN ('ok','partial','failed')),
+        last_sync_detail  TEXT,
+        -- Counters from the last run, so an operator can see "3 new, 1 gone"
+        -- without reading logs. A sync that reports zero changes for a week is
+        -- as informative as one that reports a hundred.
+        last_seen_count      INTEGER NOT NULL DEFAULT 0,
+        last_new_count       INTEGER NOT NULL DEFAULT 0,
+        last_absent_count    INTEGER NOT NULL DEFAULT 0,
+        created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+        UNIQUE (namespace, name)
+    );
+    CREATE INDEX IF NOT EXISTS uc_catalog_source_due_idx
+        ON uc_catalog_source (enabled, last_sync_at);
+
+    -- Ingest columns on the securable itself.
+    --
+    -- state: 'present' or 'absent'. An object that disappears upstream is
+    -- MARKED, never deleted — deleting it would cascade its grants, so a table
+    -- dropped and recreated would silently lose every deny that was on it.
+    -- Same invariant as meter_events: governance metadata outlives its subject,
+    -- and a human decides when it is really gone.
+    --
+    -- An absent object still resolves NORMALLY. Its denies still apply, because
+    -- "the upstream table vanished" is not evidence that access should widen —
+    -- and a sync failure must never become an authorization change.
+    --
+    -- external_id: the source's own identifier, when it has one. Keying on the
+    -- dotted path instead means a RENAME creates a new securable and orphans
+    -- every grant on the old one. Snowflake and Databricks both expose stable
+    -- ids; information_schema does not, so the path is the fallback and renames
+    -- are lossy there — which is worth saying out loud rather than discovering.
+    ALTER TABLE uc_securable ADD COLUMN IF NOT EXISTS
+        source_id     UUID REFERENCES uc_catalog_source(id) ON DELETE SET NULL;
+    ALTER TABLE uc_securable ADD COLUMN IF NOT EXISTS
+        external_id   TEXT;
+    ALTER TABLE uc_securable ADD COLUMN IF NOT EXISTS
+        state         VARCHAR(16) NOT NULL DEFAULT 'present';
+    ALTER TABLE uc_securable ADD COLUMN IF NOT EXISTS
+        last_seen_at  TIMESTAMPTZ;
+
+    DO $$ BEGIN
+        ALTER TABLE uc_securable ADD CONSTRAINT uc_securable_state_check
+            CHECK (state IN ('present','absent'));
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+    -- The upsert key when the source provides an identifier. Partial, because
+    -- hand-created securables have no external_id and must not collide.
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_securable_external_idx
+        ON uc_securable (source_id, external_id)
+        WHERE source_id IS NOT NULL AND external_id IS NOT NULL;
+
+    -- "What went missing" is the question after every sync.
+    CREATE INDEX IF NOT EXISTS uc_securable_absent_idx
+        ON uc_securable (namespace) WHERE state = 'absent';
+
     -- ── Tool → securable bindings ────────────────────────────────────────
     -- WHICH DATA OBJECTS A TOOL TOUCHES. Without a row here a tool is never
     -- checked at all: ext_authz looks up (server_id, tool_name), finds
