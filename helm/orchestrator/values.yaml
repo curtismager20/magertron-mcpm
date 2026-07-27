@@ -337,6 +337,51 @@ orchestrator:
     # visibility of server CRUD.
     hotPathCacheTtlSeconds: "60"
 
+    # ── Unity Catalog: data-object governance ────────────────────────────
+    # Tool RBAC decides which TOOLS a principal may invoke. Unity Catalog
+    # decides which DATA OBJECTS those tools may reach — the second question,
+    # asked at ext_authz right after the first.
+    #
+    # OBSERVE BY DEFAULT (empty / "0" / "false"). Verdicts are resolved and
+    # written to audit_events with the deciding rule and its source, and the
+    # call proceeds regardless. Enforcing from a standing start would deny
+    # traffic that works today, because no one has granted UC privileges for
+    # real workloads yet — the same reason drift detection shipped in observe
+    # mode first.
+    #
+    # Costs nothing where nothing is declared: a tool with no rows in
+    # uc_tool_securable skips the check after a single in-memory hash lookup,
+    # which is every tool until an operator maps one.
+    #
+    # Read the observe output before flipping this:
+    #   SELECT actor, server_name, detail, count(*)
+    #   FROM audit_events WHERE kind = 'UcAccessDenied'
+    #   GROUP BY 1,2,3 ORDER BY 4 DESC;
+    #
+    # Every row there becomes a 403 the moment this is "1".
+    #
+    # LIMITATION (3.2.4x): enforcement is GLOBAL, and the check currently runs
+    # on the EXTERNAL server path only — internal servers are not covered. Both
+    # are known gaps, not design decisions.
+    ucEnforce: ""            # "" | "0" | "false" = observe · "1" | "true" = enforce
+
+    # How often the in-memory catalog is rebuilt from Postgres: securables,
+    # grants, and tool→securable bindings. This is the window in which a
+    # REVOKED grant is still honoured, so it is a compliance number as much as
+    # a performance one. Minimum 5; the binary default is 30.
+    ucRefreshSeconds: "30"
+
+    # How often each replica rebuilds its RBAC role set from the database.
+    #
+    # Before 3.2.4x roles were loaded once at boot and never again, and the
+    # in-memory map was additive — so on a multi-replica deployment a role
+    # deleted or revoked through the API updated only the pod that handled the
+    # write. Offboarding took effect on roughly half of requests until the next
+    # restart. Observed in the wild: one replica listing 9 roles, another 16.
+    #
+    # Minimum 5; the binary default is 30.
+    rbacRefreshSeconds: "30"
+
     # ── 3.1.03: ext_authz pipeline sizing ────────────────────────────────
     # (MCP_AUDIT_QUEUE_CAPACITY / MCP_METER_QUEUE_CAPACITY / MCP_DRAIN_BATCH_MAX)
     #
