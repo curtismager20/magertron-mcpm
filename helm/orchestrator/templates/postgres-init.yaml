@@ -1050,11 +1050,6 @@ data:
     -- STATEMENT-level, not row-level: a bulk revoke of two hundred grants
     -- should wake the listener once, not two hundred times. The listener
     -- reloads the whole store either way.
-    DROP TRIGGER IF EXISTS uc_grant_notify_trg ON uc_grant;
-    CREATE TRIGGER uc_grant_notify_trg
-        AFTER INSERT OR UPDATE OR DELETE ON uc_grant
-        FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
-
     DROP TRIGGER IF EXISTS uc_securable_notify_trg ON uc_securable;
     CREATE TRIGGER uc_securable_notify_trg
         AFTER INSERT OR UPDATE OR DELETE ON uc_securable
@@ -1105,6 +1100,119 @@ data:
         granted_by    TEXT,                              -- audit: who granted it
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    DROP TRIGGER IF EXISTS uc_grant_notify_trg ON uc_grant;
+    CREATE TRIGGER uc_grant_notify_trg
+        AFTER INSERT OR UPDATE OR DELETE ON uc_grant
+        FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
+
+    -- ── Tool → securable bindings ────────────────────────────────────────
+    -- WHICH DATA OBJECTS A TOOL TOUCHES. Without a row here a tool is never
+    -- checked at all: ext_authz looks up (server_id, tool_name), finds
+    -- nothing, and the call proceeds. So this table is what makes the catalog
+    -- apply to agent traffic — grants without bindings are recorded and never
+    -- consulted.
+    --
+    -- These three tables (with uc_warehouse_config and meter_call_securable
+    -- below) existed only on clusters where they had been applied by hand. A
+    -- fresh install created uc_securable and uc_grant, rendered the whole UI,
+    -- and governed nothing — the worst failure shape for a governance product,
+    -- because it looks like it is working.
+    --
+    -- In 01-schema.sql deliberately: SchemaGuard re-applies this file on every
+    -- restart, so existing clusters pick the tables up. 02-cost-metering.sql
+    -- runs only on a fresh volume, which is how they went missing.
+    --
+    -- No FK on server_id: a binding may name a server that is later removed
+    -- and re-registered with a new id, and losing the governance declaration
+    -- because a connector was reprovisioned is worse than a dangling row.
+    CREATE TABLE IF NOT EXISTS uc_tool_securable (
+        id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+        server_id     UUID         NOT NULL,
+        tool_name     VARCHAR(255) NOT NULL,
+        securable_id  UUID         NOT NULL
+                      REFERENCES uc_securable(id) ON DELETE CASCADE,
+        -- Selects WHICH privilege is checked: read→SELECT, write→MODIFY,
+        -- vend→EXTERNAL_USE_SCHEMA. An assertion about the tool's behaviour;
+        -- nothing verifies it against what the tool really does.
+        access_kind   VARCHAR(16)  NOT NULL DEFAULT 'read'
+                      CHECK (access_kind IN ('read','write','vend')),
+        declared_by   TEXT,
+        created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    );
+    -- The request-path lookup. Every tools/call hits this key.
+    CREATE INDEX IF NOT EXISTS uc_tool_securable_tool_idx
+        ON uc_tool_securable (server_id, tool_name);
+    CREATE INDEX IF NOT EXISTS uc_tool_securable_securable_idx
+        ON uc_tool_securable (securable_id);
+    -- Declaring the same binding twice is a no-op, not a second row.
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_tool_securable_unique_idx
+        ON uc_tool_securable (server_id, tool_name, securable_id, access_kind);
+    -- Partial: "what can hand out storage credentials" is the question an
+    -- auditor asks most and the one worth answering without a scan.
+    CREATE INDEX IF NOT EXISTS uc_tool_securable_vend_idx
+        ON uc_tool_securable (securable_id) WHERE access_kind = 'vend';
+
+    DROP TRIGGER IF EXISTS uc_tool_securable_notify_trg ON uc_tool_securable;
+    CREATE TRIGGER uc_tool_securable_notify_trg
+        AFTER INSERT OR UPDATE OR DELETE ON uc_tool_securable
+        FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
+
+    -- ── Warehouse connection metadata ────────────────────────────────────
+    -- How to read usage back from a data warehouse, and in what unit.
+    --
+    -- connection_type is a TYPE DISCRIMINATOR, not a billing entity — it says
+    -- how to talk to the thing, which is why it is not called vendor.
+    --   inline     — the response carries the cost (BigQuery totalBytesProcessed)
+    --   reconciled — the cost arrives later from the vendor's own usage API
+    --   none       — no observable unit; calls are counted, not priced
+    CREATE TABLE IF NOT EXISTS uc_warehouse_config (
+        server_id          UUID         PRIMARY KEY
+                           REFERENCES deployed_servers(id) ON DELETE CASCADE,
+        connection_type    VARCHAR(32)  NOT NULL
+                           CHECK (connection_type IN ('bigquery','snowflake',
+                                                      'databricks','redshift',
+                                                      'postgres','other')),
+        meter_unit         VARCHAR(24)
+                           CHECK (meter_unit IS NULL OR
+                                  meter_unit IN ('byte','credit')),
+        observability      VARCHAR(16)  NOT NULL DEFAULT 'none'
+                           CHECK (observability IN ('inline','reconciled','none')),
+        usage_json_path    TEXT,
+        connection_project VARCHAR(255),
+        connection_account VARCHAR(255),
+        created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS uc_warehouse_config_connection_type_idx
+        ON uc_warehouse_config (connection_type);
+
+    -- ── Call → data object attribution ───────────────────────────────────
+    -- Which data objects a metered call actually touched.
+    --
+    -- Written by the audit flusher for ALLOWED calls only: a refused call never
+    -- reached the upstream service, so attributing usage to it would invent it.
+    -- This is what turns spend from "the connector cost £4,000" into "this
+    -- agent cost £4,000 against that table", and what draws the observed
+    -- principal→tool→object edge.
+    --
+    -- billing_group_id has no FK: it is assigned by a trigger on meter_events
+    -- and resolved back by join, and a metering row must never fail to write
+    -- because an attribution row raced it.
+    CREATE TABLE IF NOT EXISTS meter_call_securable (
+        billing_group_id UUID         NOT NULL,
+        securable_id     UUID         NOT NULL
+                         REFERENCES uc_securable(id) ON DELETE CASCADE,
+        -- Splits a call across several objects. 1.0 for the single-object case,
+        -- which is every case today — anything else is an estimate and should
+        -- be labelled as one.
+        weight           NUMERIC(6,4) NOT NULL DEFAULT 1.0
+                         CHECK (weight > 0 AND weight <= 1),
+        PRIMARY KEY (billing_group_id, securable_id)
+    );
+    CREATE INDEX IF NOT EXISTS meter_call_securable_securable_idx
+        ON meter_call_securable (securable_id);
+
 
     -- One row per (securable, principal, privilege): a re-grant flips allow↔deny
     -- rather than stacking duplicates (matches UcSecurableStore::add_grant).
