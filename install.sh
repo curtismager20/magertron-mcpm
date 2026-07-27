@@ -379,6 +379,23 @@ ENABLE_PROBO="${ENABLE_PROBO:-0}"
 # rather use the Anthropic-backed assistant, leave this off and configure
 # the Anthropic provider + key instead.
 ENABLE_OLLAMA="${ENABLE_OLLAMA:-0}"
+
+# ── Unity Catalog enforcement ───────────────────────────────────────────────
+# ON by default, and that is the safe default rather than the aggressive one.
+#
+# The data-object check only runs for a tool that has a DECLARED BINDING —
+# a row in uc_tool_securable saying "this tool reaches that table". A fresh
+# install has none, so nothing is checked and nothing can be denied. Declaring
+# a binding is therefore the opt-in, and it is a deliberate administrative act.
+#
+# Defaulting to observe would mean that act quietly does nothing: an operator
+# maps a tool to a table, expects it governed, and it is not — with no error to
+# tell them. That is a worse failure than a denial, because it is silent.
+#
+# UC_OBSERVE=1 or --uc-observe resolves verdicts and records them to
+# audit_events WITHOUT blocking, which is the right setting while mapping an
+# existing estate: it shows exactly what would be refused before anything is.
+UC_OBSERVE="${UC_OBSERVE:-0}"
 HELM_REPO_NAME="${HELM_REPO_NAME:-magertron}"
 RELEASE_NAME="${RELEASE_NAME:-mcp}"
 
@@ -438,6 +455,16 @@ Common options:
                               and a bootstrap admin token for MCP
                               registration; without them probod will not
                               become ready.
+  --uc-observe                Run Unity Catalog data-object checks in
+                              OBSERVE mode: every verdict is resolved and
+                              written to audit_events with the rule that
+                              decided it, but no call is blocked. Off by
+                              default — i.e. enforcement is ON.
+                              Nothing is checked until a tool is bound to a
+                              data object, so a fresh install denies
+                              nothing either way. Use this while mapping an
+                              existing estate, to see what WOULD be refused
+                              before anything is.
   --enable-ollama             Deploy the bundled Ollama local LLM (the
                               advisory assistant's local "brain") and point
                               the assistant provider at it. Off by default.
@@ -475,6 +502,7 @@ while [ $# -gt 0 ]; do
         --label-nodes)     LABEL_NODES=1; shift ;;
         --enable-probo)    ENABLE_PROBO=1; shift ;;
         --enable-ollama)   ENABLE_OLLAMA=1; shift ;;
+        --uc-observe)      UC_OBSERVE=1; shift ;;
         --non-interactive) NON_INTERACTIVE=1; shift ;;
         -h|--help)         usage; exit 0 ;;
         *)
@@ -986,6 +1014,22 @@ HELM_VALUES=(
 # (values.yaml) stand, rather than forcing an empty override.
 if [ -n "$API_PUBLIC_URL" ]; then
     HELM_VALUES+=( --set "orchestrator.env.apiPublicUrl=$API_PUBLIC_URL" )
+fi
+
+# Unity Catalog enforcement. Passed EXPLICITLY in both directions rather than
+# relying on the chart default, so the rendered deployment always states which
+# mode it is in — an operator reading `kubectl get deploy -o yaml` should never
+# have to infer it from an absent variable.
+#
+# This also closes a real trap: setting UC_ENFORCE with `kubectl set env` does
+# not survive `helm upgrade`, which rewrites the pod spec from values. Every
+# upgrade silently reverted enforcement to observe, and the only symptom was a
+# call succeeding that should not have.
+if [ "$UC_OBSERVE" = "1" ]; then
+    HELM_VALUES+=( --set "orchestrator.env.ucEnforce=0" )
+    note "Unity Catalog: OBSERVE mode — verdicts recorded, nothing blocked."
+else
+    HELM_VALUES+=( --set "orchestrator.env.ucEnforce=1" )
 fi
 
 # Opt-in: deploy the Probo GRC subsystem. Chart default is probo.enabled=false,

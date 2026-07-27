@@ -200,6 +200,36 @@ spec:
               value: {{ .Values.orchestrator.env.dbPoolSize | default "8" | quote }}
             - name: MCP_HOT_PATH_CACHE_TTL_SEC
               value: {{ .Values.orchestrator.env.hotPathCacheTtlSeconds | default "5" | quote }}
+            # ── 3.2.4x: Unity Catalog + RBAC refresh ─────────────────────
+            # The SAME omission as the 3.1.01 block above, and worth naming
+            # rather than repeating quietly: these are read by the binary but
+            # were not rendered here, so `kubectl set env UC_ENFORCE=1` was
+            # wiped by the next `helm upgrade` — which rewrites the pod spec
+            # from values — and enforcement silently reverted to observe. The
+            # only symptom was a call succeeding that should not have, with a
+            # correct UcAccessDenied row sitting beside it. A control that
+            # turns itself off on upgrade is worse than one that was never
+            # enabled.
+            #
+            # ucEnforce defaults to "1". That is the SAFE default, not the
+            # aggressive one: the data-object check only runs for a tool with
+            # a declared binding in uc_tool_securable, and a fresh install has
+            # none. Declaring a binding is the opt-in.
+            - name: UC_ENFORCE
+              value: {{ .Values.orchestrator.env.ucEnforce | default "1" | quote }}
+            # How often the in-memory catalog is rebuilt from Postgres —
+            # securables, grants, and tool→securable bindings. This is the
+            # window in which a REVOKED grant is still honoured, so it is a
+            # compliance number as much as a performance one. Minimum 5.
+            - name: UC_REFRESH_SECS
+              value: {{ .Values.orchestrator.env.ucRefreshSeconds | default "30" | quote }}
+            # How often each replica rebuilds its RBAC role set. Before 3.2.4x
+            # roles were loaded once at boot and the map was additive, so on a
+            # multi-replica deployment a deleted or revoked role kept
+            # authorizing on whichever pod did not handle the write —
+            # offboarding took effect on roughly half of requests. Minimum 5.
+            - name: RBAC_REFRESH_SECS
+              value: {{ .Values.orchestrator.env.rbacRefreshSeconds | default "30" | quote }}
             # ── 3.1.03: ext_authz queue sizing ───────────────────────────
             # Defaults here MUST match the compiled defaults in
             # ext_authz/auditor.cpp (env_size fallbacks) so an unset value

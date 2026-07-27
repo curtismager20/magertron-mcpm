@@ -363,7 +363,17 @@ orchestrator:
     # LIMITATION (3.2.4x): enforcement is GLOBAL, and the check currently runs
     # on the EXTERNAL server path only — internal servers are not covered. Both
     # are known gaps, not design decisions.
-    ucEnforce: ""            # "" | "0" | "false" = observe · "1" | "true" = enforce
+    #
+    # DEFAULT IS ON, and that is the safe default rather than the aggressive
+    # one. The check only runs for a tool with a DECLARED BINDING, and a fresh
+    # install has none — so nothing is checked and nothing can be denied until
+    # an operator deliberately maps a tool to a data object. Declaring that
+    # binding IS the opt-in.
+    #
+    # Defaulting to observe would make that act silently ineffective: someone
+    # maps a tool, expects it governed, and it is not, with no error to say so.
+    # A denial is visible; a policy that quietly does not apply is not.
+    ucEnforce: "1"           # "1" | "true" = enforce · "0" | "false" | "" = observe
 
     # How often the in-memory catalog is rebuilt from Postgres: securables,
     # grants, and tool→securable bindings. This is the window in which a
