@@ -1018,6 +1018,48 @@ data:
     --   external_use_schema | browse
     -- external_use_schema is the credential-vending gate and, per the resolver,
     -- is the one privilege that does NOT inherit downward.
+    -- ── Catalog change notification ──────────────────────────────────────
+    -- Collapses the refresh window from one timer interval to about a second.
+    --
+    -- The in-memory catalog is rebuilt on a 30s tick, which means a REVOKED
+    -- grant is still honoured for up to 30 seconds. That is a compliance
+    -- number, not a performance one, and "we stop enforcing your revocation
+    -- for half a minute" is a poor answer to an auditor.
+    --
+    -- A TRIGGER rather than an application-side NOTIFY, because most catalog
+    -- edits do not go through the API: operators grant with psql, migrations
+    -- rewrite rows, and a support engineer fixing something at 3am will not
+    -- remember to call an endpoint. The trigger fires for all of them.
+    --
+    -- The timer STAYS as a backstop. A dropped notification, a listener
+    -- connection that died and has not reconnected, or a replica that missed
+    -- the window must not mean permanent staleness — it should mean one more
+    -- tick of delay.
+    --
+    -- Payload is the table name only. The listener reloads everything anyway
+    -- (replace-all semantics are what make revocation work), so a larger
+    -- payload would carry information nobody reads, and NOTIFY payloads are
+    -- capped at 8000 bytes.
+    CREATE OR REPLACE FUNCTION uc_notify_change() RETURNS TRIGGER AS $$
+    BEGIN
+        PERFORM pg_notify('uc_changed', TG_TABLE_NAME);
+        RETURN NULL;   -- AFTER trigger; return value is ignored
+    END;
+    $$ LANGUAGE plpgsql;
+
+    -- STATEMENT-level, not row-level: a bulk revoke of two hundred grants
+    -- should wake the listener once, not two hundred times. The listener
+    -- reloads the whole store either way.
+    DROP TRIGGER IF EXISTS uc_grant_notify_trg ON uc_grant;
+    CREATE TRIGGER uc_grant_notify_trg
+        AFTER INSERT OR UPDATE OR DELETE ON uc_grant
+        FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
+
+    DROP TRIGGER IF EXISTS uc_securable_notify_trg ON uc_securable;
+    CREATE TRIGGER uc_securable_notify_trg
+        AFTER INSERT OR UPDATE OR DELETE ON uc_securable
+        FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
+
     -- ── Per-namespace enforcement ────────────────────────────────────────
     -- Whether the data-object check BLOCKS in this namespace, or only records.
     --
@@ -1039,6 +1081,12 @@ data:
         updated_by  TEXT,
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    DROP TRIGGER IF EXISTS uc_namespace_config_notify_trg ON uc_namespace_config;
+    CREATE TRIGGER uc_namespace_config_notify_trg
+        AFTER INSERT OR UPDATE OR DELETE ON uc_namespace_config
+        FOR EACH STATEMENT EXECUTE FUNCTION uc_notify_change();
+
 
     CREATE TABLE IF NOT EXISTS uc_grant (
         id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
