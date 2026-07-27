@@ -1018,6 +1018,28 @@ data:
     --   external_use_schema | browse
     -- external_use_schema is the credential-vending gate and, per the resolver,
     -- is the one privilege that does NOT inherit downward.
+    -- ── Per-namespace enforcement ────────────────────────────────────────
+    -- Whether the data-object check BLOCKS in this namespace, or only records.
+    --
+    -- UC_ENFORCE is a deployment-wide env var, which is the wrong granularity
+    -- for a shared cluster: it turns enforcement on for every tenant at once,
+    -- including ones whose grants are not mapped yet. Nobody flips a global
+    -- switch on production, so in practice it stays off and the feature is
+    -- demoable rather than adoptable.
+    --
+    -- ABSENT ROW = fall back to the env var. That keeps every existing
+    -- deployment behaving exactly as it does today, and makes this an opt-in
+    -- per tenant rather than a migration.
+    CREATE TABLE IF NOT EXISTS uc_namespace_config (
+        namespace   TEXT        PRIMARY KEY,
+        -- NULL means "no opinion, use the deployment default". Deliberately
+        -- three-valued: an operator who has explicitly set observe must not be
+        -- silently promoted to enforcing when someone flips the global flag.
+        enforce     BOOLEAN,
+        updated_by  TEXT,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS uc_grant (
         id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
         securable_id  UUID        NOT NULL
@@ -1102,159 +1124,6 @@ data:
     -- two sources of truth that can diverge — the same failure shape this
     -- section exists to avoid. Tenant-scoped grant queries join through
     -- uc_securable.
-
-    -- ── Tool → securable bindings ───────────────────────────────────────────────
-    -- Which data objects an MCP tool is declared to touch. This is the link that
-    -- makes agent → tool → data reachability answerable, and it is the one thing
-    -- a data catalog structurally cannot know: the tool layer belongs to the
-    -- orchestrator, not the warehouse.
-    --
-    -- A binding GRANTS NOTHING. uc_grant decides a principal's authority; this
-    -- describes a tool's behaviour. Declaring that run_query touches orders does
-    -- not let anyone read orders — it only makes the path visible. Keeping the
-    -- two separate is what stops a binding from being able to widen access.
-    --
-    -- Why not a securable_id column on meter_events: one call can touch several
-    -- tables, which would force a choice between fanning out (and multiplying a
-    -- single billable call), storing an array (and making the rating engine
-    -- parse JSON), or storing only the first (and being wrong). meter_events
-    -- keeps its one-call-one-row invariant; this joins to it.
-    CREATE TABLE IF NOT EXISTS uc_tool_securable (
-        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-        -- Deliberately NOT a foreign key to a tools table: tool lists are
-        -- refreshed from upstream servers and a tool can vanish and return
-        -- across a redeploy, which would cascade these bindings away for no
-        -- good reason.
-        server_id     UUID NOT NULL,
-        tool_name     VARCHAR(255) NOT NULL,
-
-        -- CASCADE is correct here, and is the same reasoning as uc_grant: a
-        -- deleted securable cannot be touched, so the binding is meaningless
-        -- without it. The opposite of meter_events, which must outlive its
-        -- subject because it is a financial record.
-        securable_id  UUID NOT NULL
-                      REFERENCES uc_securable(id) ON DELETE CASCADE,
-
-        --   read  — queries the object
-        --   write — inserts/updates/deletes
-        --   vend  — hands the caller storage credentials for it
-        access_kind   VARCHAR(16) NOT NULL DEFAULT 'read'
-                      CHECK (access_kind IN ('read','write','vend')),
-
-        declared_by   TEXT,
-        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    -- A tool that both reads and writes the same table gets two rows, which is
-    -- what the reachability view wants to show.
-    CREATE UNIQUE INDEX IF NOT EXISTS uc_tool_securable_unique_idx
-        ON uc_tool_securable (server_id, tool_name, securable_id, access_kind);
-    -- "What does this tool touch?" — used when metering resolves a call.
-    CREATE INDEX IF NOT EXISTS uc_tool_securable_tool_idx
-        ON uc_tool_securable (server_id, tool_name);
-    -- "What touches this table?" — the hot direction; backs reachability and
-    -- the access review.
-    CREATE INDEX IF NOT EXISTS uc_tool_securable_securable_idx
-        ON uc_tool_securable (securable_id);
-    -- Vend bindings are the exfiltration surface and get asked about on their
-    -- own. Partial index keeps that cheap without bloating the common case.
-    CREATE INDEX IF NOT EXISTS uc_tool_securable_vend_idx
-        ON uc_tool_securable (securable_id) WHERE access_kind = 'vend';
-
-    -- ── Data warehouses as first-class metered servers ──────────────────────────
-    -- A warehouse is metered like an LLM: the caller reports what it consumed,
-    -- the rating engine prices it against a contract. Only the unit differs —
-    -- bytes scanned or credits instead of tokens.
-    --
-    -- What this is NOT: an invoice. Magertron never sees the vendor's bill, and
-    -- the vendor's own attribution lags by hours. This supports a real-time
-    -- ESTIMATE of what an agent is costing — a weaker claim than an invoice and
-    -- a far more useful one, because you can act on it while the agent is still
-    -- running.
-    ALTER TABLE deployed_servers DROP CONSTRAINT IF EXISTS deployed_servers_server_type_check;
-    ALTER TABLE deployed_servers ADD  CONSTRAINT deployed_servers_server_type_check
-        CHECK (server_type IN ('internal','hybrid','external','rest','warehouse'));
-
-    -- Restated with 'warehouse' on the endpoint-backed branch. This supersedes
-    -- the earlier definition of the same constraint above; the stale one fails
-    -- on every boot because it predates 'rest'.
-    ALTER TABLE deployed_servers DROP CONSTRAINT IF EXISTS deployed_servers_type_invariant;
-    ALTER TABLE deployed_servers ADD  CONSTRAINT deployed_servers_type_invariant CHECK (
-        (server_type IN ('internal', 'hybrid')
-         AND image IS NOT NULL
-         AND endpoint_url IS NULL)
-        OR
-        (server_type IN ('external', 'rest', 'warehouse')
-         AND image IS NULL
-         AND endpoint_url IS NOT NULL
-         AND auth_type IS NOT NULL)
-    );
-
-    -- Separate from deployed_servers because it answers a different question:
-    -- that table says how to REACH the thing, this says how to PRICE what it
-    -- reports.
-    CREATE TABLE IF NOT EXISTS uc_warehouse_config (
-        server_id        UUID PRIMARY KEY
-                         REFERENCES deployed_servers(id) ON DELETE CASCADE,
-
-        -- WHAT KIND of system sits behind this endpoint. A type discriminator,
-        -- not a billing entity: it decides which unit to expect, whether usage
-        -- is observable at all, and where in the response to find it.
-        --
-        -- Deliberately not called 'vendor'. Nobody invoices you for an internal
-        -- Postgres, yet 'postgres' is a legal value here — so the field cannot
-        -- be about who bills you. Who bills you already lives in
-        -- cost_contracts, per server. Three BigQuery projects are three
-        -- connections and one Google contract; conflating the two would break
-        -- the first time a customer has two Snowflake accounts on separate
-        -- agreements.
-        --
-        -- The name also happens to match Unity Catalog's own vocabulary, where
-        -- a Connection is a credentialed pointer at an external system whose
-        -- foreign catalog is then governed like a native one. That is a bonus
-        -- rather than the reason.
-        connection_type  VARCHAR(32) NOT NULL
-                         CHECK (connection_type IN ('bigquery','snowflake',
-                                                    'databricks','redshift',
-                                                    'postgres','other')),
-
-        -- NULL means this warehouse reports nothing meterable — an internal
-        -- Postgres, an on-prem cluster. Those are governed and audited, never
-        -- costed, and the API returns a NULL cost for them rather than zero.
-        -- Zero says free; null says not priceable.
-        -- Must be a unit meter_events already accepts, since that is where the
-        -- reported quantity lands and what the rating engine prices. 'byte'
-        -- covers BigQuery's totalBytesProcessed; 'credit' covers Snowflake.
-        meter_unit       VARCHAR(24)
-                         CHECK (meter_unit IS NULL OR meter_unit IN
-                                ('byte','credit')),
-
-        -- WHEN the unit becomes observable — the feasibility axis:
-        --   inline      the response carries it (BigQuery totalBytesProcessed)
-        --   reconciled  a vendor usage view carries it, polled after the fact
-        --   none        not observable per call at all
-        -- Only 'inline' can support a real-time throttle; 'reconciled' supports
-        -- reporting but cannot stop a call mid-flight, and the UI must not
-        -- imply otherwise.
-        observability    VARCHAR(16) NOT NULL DEFAULT 'none'
-                         CHECK (observability IN ('inline','reconciled','none')),
-
-        -- Config rather than code, so a vendor changing its response shape is a
-        -- row update instead of a release.
-        usage_json_path  TEXT,
-
-        -- Upstream identifiers, used to build the query URL and to reconcile
-        -- against the provider's own usage view. Named for the connection, not
-        -- for a vendor, for the same reason as above.
-        connection_project VARCHAR(255),
-        connection_account VARCHAR(255),
-        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS uc_warehouse_config_connection_type_idx
-        ON uc_warehouse_config (connection_type);
   02-cost-metering.sql: |
     -- ════════════════════════════════════════════════════════════════════════
     -- Magertron Cost Metering & Contract Rating (v1)
@@ -1589,51 +1458,6 @@ data:
     -- At most one server-scoped budget per server.
     CREATE UNIQUE INDEX IF NOT EXISTS cost_budgets_server_uq
         ON cost_budgets (server_id) WHERE scope_type = 'server';
-
-    -- ── Data-object attribution for metered calls ───────────────────────────────
-    -- Warehouse units sit alongside 'credit' and 'token'. One meter_events row
-    -- is still one call; only the vocabulary widens.
-    -- Warehouse metering needs NO new unit: 'byte' already exists and is already
-    -- in use. BigQuery reports totalBytesProcessed, which is bytes. The
-    -- vocabulary is restated here only so a fresh install matches an upgraded
-    -- one; it is deliberately identical to the live constraint rather than a
-    -- superset, because every speculative unit added here is one the rating
-    -- engine has no schedule for.
-    ALTER TABLE meter_events DROP CONSTRAINT IF EXISTS meter_events_unit_check;
-    ALTER TABLE meter_events ADD  CONSTRAINT meter_events_unit_check
-        CHECK (unit IN ('credit','call','token','byte'));
-
-    -- Which securables a metered CALL touched. Distinct from uc_tool_securable,
-    -- which is a DECLARATION about a tool; this is an OBSERVATION about one call.
-    --
-    -- Keyed on billing_group_id, not on a meter_events row, for two reasons.
-    -- One call produces several meter_events rows (one per priced dimension)
-    -- sharing a single billing_group_id, and the objects touched are a property
-    -- of the CALL — keying per-dimension would duplicate them and inflate every
-    -- per-table rollup. And insert_meter_events_batch returns a count rather
-    -- than the generated ids, so there is nothing to join on; the group id is
-    -- known to the caller before the insert.
-    CREATE TABLE IF NOT EXISTS meter_call_securable (
-        billing_group_id UUID NOT NULL,
-        securable_id     UUID NOT NULL
-                         REFERENCES uc_securable(id) ON DELETE CASCADE,
-
-        -- Share of the call attributed here. 1.0 for a single object, split
-        -- when several were touched. A split is an ESTIMATE and is labelled as
-        -- one wherever it surfaces — a three-table join does not really cost a
-        -- third per table, and no vendor reports per-object bytes.
-        weight           NUMERIC(6,4) NOT NULL DEFAULT 1.0
-                         CHECK (weight > 0 AND weight <= 1),
-        PRIMARY KEY (billing_group_id, securable_id)
-    );
-
-    -- No FK to meter_events, deliberately: financial records must outlive their
-    -- subject — the same invariant that keeps meter_events.server_id from
-    -- cascading — so deleting a securable must never rewrite billing history.
-    -- The securable side DOES cascade, since a deleted object cannot have been
-    -- touched.
-    CREATE INDEX IF NOT EXISTS meter_call_securable_securable_idx
-        ON meter_call_securable (securable_id);
   03-seed.sql: |
     -- Seed data: default admin user. Password hash from .Values.seed.adminPasswordHash
     -- (default: bcrypt of "admin" — CHANGE for production).
