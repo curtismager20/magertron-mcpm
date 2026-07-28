@@ -1144,6 +1144,20 @@ data:
         last_seen_count      INTEGER NOT NULL DEFAULT 0,
         last_new_count       INTEGER NOT NULL DEFAULT 0,
         last_absent_count    INTEGER NOT NULL DEFAULT 0,
+        -- WHICH view answered, and therefore what guarantee this source gives.
+        --
+        -- Snowflake exposes the same objects two ways. ACCOUNT_USAGE carries
+        -- TABLE_ID, so a rename updates a row in place and its grants survive;
+        -- INFORMATION_SCHEMA has no identifier, so a rename is
+        -- indistinguishable from a delete plus a create and every grant on the
+        -- old name is silently orphaned.
+        --
+        -- That is a property of the CONNECTION, not of the product, and an
+        -- operator cannot infer it from anywhere else. Recording it means the
+        -- UI can say "renames are not safe on this source" instead of leaving
+        -- someone to discover it when a deny disappears.
+        source_view          VARCHAR(32),
+        stable_ids           BOOLEAN NOT NULL DEFAULT FALSE,
         created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
         UNIQUE (namespace, name)
     );
