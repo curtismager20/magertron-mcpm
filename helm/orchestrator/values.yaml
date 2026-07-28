@@ -1320,7 +1320,11 @@ inventory:
     # Enabling grants mcp-inventory `get` on secrets in this namespace (get
     # only, no list — the poller knows the name it wants) and starts a poller
     # that syncs any registered catalog source.
-    enabled: false
+    #
+    # ON for this cluster. It stays OFF in the shipped defaults, because ingest
+    # reads customer credentials and talks to an external warehouse, and
+    # neither should begin because somebody upgraded a chart.
+    enabled: true
 
     # The orchestrator's REST base. The poller asks it what is due and POSTs
     # what it found.
