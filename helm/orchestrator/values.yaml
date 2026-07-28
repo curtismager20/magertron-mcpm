@@ -1300,6 +1300,46 @@ inventory:
   enabled: true
   replicaCount: 1
 
+  # ── Catalog ingest ──────────────────────────────────────────────────────
+  # Reads a customer's EXISTING object graph — Snowflake today, Databricks and
+  # Glue to follow — and hands it to the orchestrator, which reconciles it into
+  # uc_securable.
+  #
+  # It lives in mcp-inventory because the drivers do: gosnowflake is
+  # first-class, and the C++ side would be hand-rolling the REST SQL API. But
+  # the poller decides NOTHING about what a sync means — what a vanished object
+  # implies, what a rename is, whether an empty read is a real answer. Those
+  # live in the orchestrator's reconcile(), one tested implementation shared by
+  # every connector, so a new source cannot get them wrong because it never
+  # makes the call.
+  #
+  # OFF by default, deliberately: ingest reads customer credentials and talks to
+  # an external warehouse, and neither should begin because someone upgraded a
+  # chart.
+  catalogIngest:
+    # Enabling grants mcp-inventory `get` on secrets in this namespace (get
+    # only, no list — the poller knows the name it wants) and starts a poller
+    # that syncs any registered catalog source.
+    enabled: false
+
+    # The orchestrator's REST base. The poller asks it what is due and POSTs
+    # what it found.
+    orchestratorApiBase: "http://mcp-orchestrator:8080"
+
+    # Where credential secrets live. A source's credential_ref names a secret
+    # HERE — "name" or "name/key", the key defaulting to "dsn". Empty uses the
+    # release namespace.
+    #
+    # No token is provisioned for the poller itself: it mints a five-minute JWT
+    # per cycle from the signing key this pod already holds, so there is no
+    # second credential to rotate and nothing long-lived on disk.
+    credentialNamespace: ""
+
+    # How often to ASK what is due. Each source carries its own
+    # sync_interval_seconds, so this is only the polling cadence and a small
+    # number costs almost nothing.
+    pollSeconds: 60
+
   image:
     repository: curtismager20/mcp-inventory
     # Empty string ("") = use .Chart.AppVersion (same convention as the
