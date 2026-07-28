@@ -171,16 +171,28 @@ spec:
             # sync_interval_seconds, so this is only the polling cadence.
             - name: MCP_CATALOG_POLL_SECONDS
               value: {{ .Values.inventory.catalogIngest.pollSeconds | default 60 | quote }}
-            # The organization the poller acts within.
+            # The PROVISIONED service-account token.
             #
-            # Used as the token AUDIENCE, because the orchestrator validates aud
-            # against the org UUID — a service name matches nothing and every
-            # call 401s. Deployment-specific and not derivable in-process, which
-            # is the same constraint MCP_DRIFT_PROBE_SA_ORG_ID solves the same
-            # way.
-            - name: MCP_ORCH_ORG_ID
-              value: {{ .Values.inventory.catalogIngest.organizationId | default .Values.drift.probe.saOrgId | quote }}
+            # A file, not an env var: a token in the pod spec is readable by
+            # anyone who can `kubectl describe pod`, and it lands in every
+            # events dump after that.
+            #
+            # It has to be provisioned rather than minted. Tokens here are not
+            # merely signed, they are REGISTERED — every valid one carries
+            # `jti` == `service_account_id` and resolves to a real
+            # service-account row, which is what makes revocation by jti work.
+            # A self-signed token names no account and fails validation whatever
+            # its audience, with a 401 that says nothing about why.
+            - name: MCP_SA_TOKEN_FILE
+              value: /etc/mcp/catalog-ingest-token
             {{- end }}
+
+          {{- if and .Values.inventory.catalogIngest .Values.inventory.catalogIngest.enabled }}
+          volumeMounts:
+            - name: catalog-ingest-token
+              mountPath: /etc/mcp
+              readOnly: true
+          {{- end }}
 
           resources:
             {{- toYaml .Values.inventory.resources | nindent 12 }}
@@ -197,4 +209,22 @@ spec:
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
+
+      {{- if and .Values.inventory.catalogIngest .Values.inventory.catalogIngest.enabled }}
+      volumes:
+        - name: catalog-ingest-token
+          secret:
+            # Created out of band, because minting a service account is an
+            # authenticated API call and a chart cannot make one. See
+            # catalogIngest.tokenSecret in values.yaml for how.
+            #
+            # optional: the pod still starts without it — the poller warns and
+            # stays idle rather than crash-looping, so a missing credential
+            # cannot take down the inventory plane.
+            secretName: {{ .Values.inventory.catalogIngest.tokenSecret | default "mcp-catalog-ingest-token" }}
+            optional: true
+            items:
+              - key: token
+                path: catalog-ingest-token
+      {{- end }}
 {{- end }}

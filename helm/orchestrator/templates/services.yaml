@@ -8,6 +8,20 @@ metadata:
 spec:
   selector:
     {{- include "mcp.selectorLabels" . | nindent 4 }}
+    # WITHOUT this, envoy-v3 and ollama also match.
+    #
+    # mcp.selectorLabels gives app / instance / name, and those three pods carry
+    # all of them — only `component` tells them apart. So this Service had 36
+    # endpoints on 8080 of which two answered, and any in-cluster caller failed
+    # about two-thirds of the time with `connection refused`.
+    #
+    # It went unnoticed because everything reaching the orchestrator goes
+    # through Envoy on the NodePort, which has its own upstream config. The
+    # catalog-ingest poller was the first thing to use this Service.
+    #
+    # Note the xds-headless Service below already does this — the pattern was
+    # right there, just not applied here.
+    component: orchestrator
   ports:
     - name: http
       port: {{ .Values.api.httpPort }}

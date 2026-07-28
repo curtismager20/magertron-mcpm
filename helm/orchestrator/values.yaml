@@ -1344,17 +1344,33 @@ inventory:
     # number costs almost nothing.
     pollSeconds: 60
 
-    # The organization the poller acts within, used as the token AUDIENCE.
+    # Secret holding the poller's service-account token, key `token`.
     #
-    # The orchestrator validates aud against the organization UUID, so a service
-    # name matches nothing and every call returns 401. It is deployment-specific
-    # and cannot be derived in-process — the same constraint the drift prober
-    # has, which is why this falls back to drift.probe.saOrgId when unset rather
-    # than inventing a second place to configure the same fact.
+    # Must be PROVISIONED, not minted. Tokens here are registered as well as
+    # signed: each carries `jti` == `service_account_id` and resolves to a real
+    # service-account row, which is what makes revoke-by-jti possible. A
+    # self-signed token names no account and fails validation whatever its
+    # audience — with a 401 that says nothing about why.
     #
-    # Find it with:
-    #   psql -c "SELECT id FROM organizations WHERE slug='default'"
-    organizationId: ""
+    # Create it once:
+    #
+    #   ORG=$(curl -sk "$API/orgs" -H "Authorization: Bearer $ADMIN_JWT" \
+    #         | python3 -c 'import sys,json;print(json.load(sys.stdin)["organizations"][0]["id"])')
+    #
+    #   TOKEN=$(curl -sk -X POST "$API/service-accounts" \
+    #     -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    #     -d "{\"organization_id\":\"$ORG\",\"name\":\"Catalog Ingest\",
+    #          \"subject\":\"mcp-catalog-ingest\",
+    #          \"role_ids\":[\"system:platform-admin\"],\"scopes\":[],
+    #          \"ttl_seconds\":31536000,\"owner_email\":\"you@example.com\"}" \
+    #     | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+    #
+    #   kubectl create secret generic mcp-catalog-ingest-token \
+    #     -n mcp-system --from-literal=token="$TOKEN"
+    #
+    # The token is shown ONCE at creation and cannot be recovered — capture it
+    # in the same command that makes it.
+    tokenSecret: "mcp-catalog-ingest-token"
 
   image:
     repository: curtismager20/mcp-inventory
