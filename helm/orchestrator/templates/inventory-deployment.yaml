@@ -139,6 +139,40 @@ spec:
             - name: MCP_INVENTORY_PROBE_TLS_VERIFY
               value: {{ .Values.inventory.config.probeTlsVerify | quote }}
 
+            # ── Catalog ingest ──────────────────────────────────────────
+            # Reads a customer's EXISTING object graph — Snowflake today — and
+            # hands it to the orchestrator, which reconciles it into
+            # uc_securable.
+            #
+            # It lives here because the drivers do: gosnowflake is first-class
+            # and the C++ side would be hand-rolling the REST SQL API. The
+            # poller decides NOTHING about what a sync means — what a vanished
+            # object implies, what a rename is, whether an empty read is a real
+            # answer. Those live in the orchestrator's reconcile(), one tested
+            # implementation shared by every connector.
+            #
+            # Setting MCP_ORCH_API_BASE is what ENABLES the poller: absent, it
+            # never starts. mcp-inventory's job is federation, and a deployment
+            # that has not configured catalog ingest should not see it fail
+            # every minute.
+            #
+            # No token is mounted. The poller mints a five-minute JWT per cycle
+            # from MCP_INVENTORY_JWT_PRIVATE_KEY, which this pod already holds
+            # because it issues its own — so there is no second credential to
+            # rotate and nothing long-lived readable in `kubectl describe pod`.
+            {{- if and .Values.inventory.catalogIngest .Values.inventory.catalogIngest.enabled }}
+            - name: MCP_ORCH_API_BASE
+              value: {{ .Values.inventory.catalogIngest.orchestratorApiBase | quote }}
+            # Where credential secrets live. A source's credential_ref names a
+            # secret HERE — "name" or "name/key", key defaulting to "dsn".
+            - name: MCP_CREDENTIAL_NAMESPACE
+              value: {{ .Values.inventory.catalogIngest.credentialNamespace | default (include "mcp.namespace" .) | quote }}
+            # How often to ASK what is due. Each source carries its own
+            # sync_interval_seconds, so this is only the polling cadence.
+            - name: MCP_CATALOG_POLL_SECONDS
+              value: {{ .Values.inventory.catalogIngest.pollSeconds | default 60 | quote }}
+            {{- end }}
+
           resources:
             {{- toYaml .Values.inventory.resources | nindent 12 }}
 
