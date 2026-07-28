@@ -1156,6 +1156,18 @@ data:
         -- operator cannot infer it from anywhere else. Recording it means the
         -- UI can say "renames are not safe on this source" instead of leaving
         -- someone to discover it when a deny disappears.
+        -- Who owns what this source brings in.
+        --
+        -- Without this every ingested object gets 'source:ingest', which
+        -- resolves to no principal — so a first sync produces a catalog nobody
+        -- can grant on, and the only route to administering it is the
+        -- break-glass claim, one object at a time. At thirty thousand objects
+        -- that is not a workflow.
+        --
+        -- Set at registration, applied to everything the source creates. NULL
+        -- keeps the old behaviour, so the objects arrive deliberately orphaned
+        -- and the UI offers to claim them.
+        default_owner        TEXT,
         source_view          VARCHAR(32),
         stable_ids           BOOLEAN NOT NULL DEFAULT FALSE,
         created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -1204,6 +1216,25 @@ data:
     -- "What went missing" is the question after every sync.
     CREATE INDEX IF NOT EXISTS uc_securable_absent_idx
         ON uc_securable (namespace) WHERE state = 'absent';
+
+    -- ── Search, for catalogs nobody browses ──────────────────────────────
+    -- At thirty thousand objects the tree is a drill-down, not a front door:
+    -- nobody scrolls to find a table, they type its name. Which makes search
+    -- the primary navigation and an unindexed ILIKE a sequential scan on every
+    -- keystroke.
+    --
+    -- pg_trgm because the useful query is a SUBSTRING match — someone types
+    -- "salar" and expects SALARIES. A btree cannot serve that; a trigram index
+    -- can, and it also handles the misspellings people actually type.
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+    CREATE INDEX IF NOT EXISTS uc_securable_name_trgm_idx
+        ON uc_securable USING gin (name gin_trgm_ops);
+
+    -- Scoped listing: the tree fetches one level at a time, and every one of
+    -- those is "children of this parent, in this namespace".
+    CREATE INDEX IF NOT EXISTS uc_securable_parent_idx
+        ON uc_securable (namespace, parent_id, name);
 
     -- ── Tool → securable bindings ────────────────────────────────────────
     -- WHICH DATA OBJECTS A TOOL TOUCHES. Without a row here a tool is never
