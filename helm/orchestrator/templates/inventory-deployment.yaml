@@ -171,6 +171,15 @@ spec:
             # sync_interval_seconds, so this is only the polling cadence.
             - name: MCP_CATALOG_POLL_SECONDS
               value: {{ .Values.inventory.catalogIngest.pollSeconds | default 60 | quote }}
+            # The organization the poller acts within.
+            #
+            # Used as the token AUDIENCE, because the orchestrator validates aud
+            # against the org UUID — a service name matches nothing and every
+            # call 401s. Deployment-specific and not derivable in-process, which
+            # is the same constraint MCP_DRIFT_PROBE_SA_ORG_ID solves the same
+            # way.
+            - name: MCP_ORCH_ORG_ID
+              value: {{ .Values.inventory.catalogIngest.organizationId | default .Values.drift.probe.saOrgId | quote }}
             {{- end }}
 
           resources:

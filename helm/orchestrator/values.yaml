@@ -1344,6 +1344,18 @@ inventory:
     # number costs almost nothing.
     pollSeconds: 60
 
+    # The organization the poller acts within, used as the token AUDIENCE.
+    #
+    # The orchestrator validates aud against the organization UUID, so a service
+    # name matches nothing and every call returns 401. It is deployment-specific
+    # and cannot be derived in-process — the same constraint the drift prober
+    # has, which is why this falls back to drift.probe.saOrgId when unset rather
+    # than inventing a second place to configure the same fact.
+    #
+    # Find it with:
+    #   psql -c "SELECT id FROM organizations WHERE slug='default'"
+    organizationId: ""
+
   image:
     repository: curtismager20/mcp-inventory
     # Empty string ("") = use .Chart.AppVersion (same convention as the
