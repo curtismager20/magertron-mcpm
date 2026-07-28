@@ -1167,6 +1167,21 @@ data:
         -- Set at registration, applied to everything the source creates. NULL
         -- keeps the old behaviour, so the objects arrive deliberately orphaned
         -- and the UI offers to claim them.
+        -- A CONNECTION TEST, not a real source.
+        --
+        -- The wizard needs to answer "does this work, and what is behind it"
+        -- before an operator commits — but the poller's normal path ends in
+        -- writing securables, and a test that creates thirty thousand objects
+        -- somebody has not agreed to is not a test.
+        --
+        -- An explicit column rather than a name prefix: magic in a string is
+        -- one rename away from a test row being treated as production, and the
+        -- failure mode there is a catalog full of objects nobody asked for.
+        --
+        -- The poller READS a test source exactly as it reads a real one — same
+        -- credential path, same query, same view selection — and simply does
+        -- not push the result. What gets tested is what will run.
+        test_only            BOOLEAN NOT NULL DEFAULT FALSE,
         default_owner        TEXT,
         source_view          VARCHAR(32),
         stable_ids           BOOLEAN NOT NULL DEFAULT FALSE,
