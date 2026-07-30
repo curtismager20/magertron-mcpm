@@ -387,7 +387,11 @@ nav .container { display: flex; justify-content: space-between; align-items: cen
 .modal-submit:hover { background: #1d4ed8; }
 
 
-.cta { padding: 80px 0; text-align: center; }
+/* Top padding cut from 80 to 28. The Sources section above already closes with
+   72px of its own, and the two stacked read as a gap rather than a break. The
+   bottom stays at 80 — that one separates the box from the footer, where the
+   space is doing real work. */
+.cta { padding: 28px 0 80px; text-align: center; }
 .cta-box {
   padding: 72px 60px; border-radius: 20px;
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(99, 102, 241, 0.05));
@@ -527,10 +531,9 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
       AI Data Reach
     </div>
     <h1 style="font-size: clamp(32px, 4vw, 50px); margin-bottom: 16px;">Which tool, <em>which table</em>,<br>for whom and when?</h1>
-    <p style="font-size: 16px; max-width: 600px; margin-bottom: 30px;">Your agents call tools. Those tools touch data. AI Data Reach governs the second half — every call authorized once for the tool, and again for the data behind it.</p>
+    <p style="font-size: 16px; max-width: 600px; margin-bottom: 30px;">Your agents call tools. Those tools touch data. AI Data Reach tracks the complete round trip — from the user and agent, to the tool and again for the data behind it.</p>
     <div class="hero-actions">
       <a href="#universe" class="btn-primary">See the Catalog Universe →</a>
-      <a href="#" class="btn-secondary" onclick="openDemoModal(event)">Schedule a Demo</a>
     </div>
   </div>
 </section>
