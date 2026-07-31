@@ -133,6 +133,17 @@ data:
     CREATE INDEX IF NOT EXISTS audit_events_event_uid_idx ON audit_events (event_uid);
     CREATE INDEX IF NOT EXISTS audit_events_class_idx     ON audit_events (class_uid, activity_id);
     CREATE INDEX IF NOT EXISTS audit_events_request_idx   ON audit_events (request_id) WHERE request_id IS NOT NULL;
+
+    -- Dual principal: the human a service account was acting for.
+    --
+    -- NULL = a direct call, no agent involved. `actor` names whoever
+    -- authenticated — the agent when this is set, the person when it is not.
+    --
+    -- Left NULL rather than mirrored into actor: an auditor must be able to
+    -- tell a delegated call from a direct one, and defaulting it would erase
+    -- exactly that distinction.
+    ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS on_behalf_of_subject TEXT;
+    CREATE INDEX IF NOT EXISTS audit_events_obo_idx ON audit_events (on_behalf_of_subject, ts) WHERE on_behalf_of_subject IS NOT NULL;
     CREATE INDEX IF NOT EXISTS audit_events_tenant_idx    ON audit_events (tenant)     WHERE tenant     IS NOT NULL;
     CREATE INDEX IF NOT EXISTS audit_events_plane_ts_idx  ON audit_events (plane, ts DESC);
 
@@ -1510,6 +1521,17 @@ data:
     CREATE INDEX IF NOT EXISTS meter_events_dept_idx     ON meter_events (caller_dept_id, incurred_at);
     CREATE INDEX IF NOT EXISTS meter_events_method_idx   ON meter_events (server_id, tool_id, method, dimension, incurred_at);
     CREATE INDEX IF NOT EXISTS meter_events_group_idx    ON meter_events (billing_group_id);
+
+    -- Dual principal: the human a service account was acting for.
+    --
+    -- NULL is the ordinary case and means something — no agent was involved,
+    -- a person or a script acted directly.
+    --
+    -- caller_user_id names whoever AUTHENTICATED, which is the AGENT on a
+    -- delegated call. A chargeback query reading caller_user_id as "the user"
+    -- would bill the service account instead of the person.
+    ALTER TABLE meter_events ADD COLUMN IF NOT EXISTS on_behalf_of_subject TEXT;
+    CREATE INDEX IF NOT EXISTS meter_events_obo_idx ON meter_events (on_behalf_of_subject, incurred_at) WHERE on_behalf_of_subject IS NOT NULL;
     -- Move 1: dimension migration for upgrade paths (pre-existing rows = 'calls').
     ALTER TABLE meter_events ADD COLUMN IF NOT EXISTS dimension TEXT NOT NULL DEFAULT 'calls';
 
