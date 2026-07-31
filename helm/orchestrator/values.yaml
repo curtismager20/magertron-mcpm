@@ -1541,7 +1541,7 @@ drift:
     # no authorization weight. If organizations collapse to a single "default"
     # per install as planned, this value becomes the only one that exists and
     # the setting stops being a decision anyone has to make.
-    saOrgId: "549bf42a-060b-4eb4-adf3-6d72d43464f9"
+    saOrgId: "f5cf7515-320b-4962-a635-7caeb52855ca"
 
   # ── Probe cadence ──────────────────────────────────────────────────────────
   # How often each KIND of governed surface is re-introspected, in seconds.
