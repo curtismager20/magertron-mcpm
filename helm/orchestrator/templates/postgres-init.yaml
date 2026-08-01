@@ -1145,6 +1145,18 @@ data:
         sync_interval_seconds INTEGER NOT NULL DEFAULT 3600
                               CHECK (sync_interval_seconds >= 60),
         enabled       BOOLEAN      NOT NULL DEFAULT TRUE,
+        -- The rename-safety notice, dismissed per source and for good.
+        --
+        -- Whether a rename upstream orphans grants is a property of the
+        -- CONNECTION, and an operator has no other way to learn it — so it is
+        -- shown until acknowledged. Repeating it forever would train people to
+        -- ignore an amber box, which is the box you want read when something
+        -- else appears in it.
+        --
+        -- NOT re-surfaced if stable_ids later changes. That would be Magertron
+        -- watching the warehouse's configuration and having opinions about it,
+        -- which is the customer's DBA's job.
+        rename_notice_ack BOOLEAN  NOT NULL DEFAULT FALSE,
         last_sync_at      TIMESTAMPTZ,
         last_sync_status  VARCHAR(16)
                           CHECK (last_sync_status IN ('ok','partial','failed')),
@@ -1199,6 +1211,12 @@ data:
         created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
         UNIQUE (namespace, name)
     );
+    -- CREATE TABLE IF NOT EXISTS above runs on a fresh database only, so a
+    -- column added there reaches new installs and nowhere else. This is what
+    -- carries it to an estate that already has the table.
+    ALTER TABLE uc_catalog_source
+        ADD COLUMN IF NOT EXISTS rename_notice_ack BOOLEAN NOT NULL DEFAULT FALSE;
+
     CREATE INDEX IF NOT EXISTS uc_catalog_source_due_idx
         ON uc_catalog_source (enabled, last_sync_at);
 
