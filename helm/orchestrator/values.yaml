@@ -1300,6 +1300,20 @@ inventory:
   enabled: true
   replicaCount: 1
 
+  # ── Drift probe ─────────────────────────────────────────────────────────
+  # Per-probe HTTP deadline, in seconds.
+  #
+  # Ten is deliberate: a tools/list against a server already serving traffic
+  # answers in 50ms to 3s, and waiting much longer converts one bad server into
+  # a slower sweep for every other. Raise it only for a fleet with a genuinely
+  # slow vendor — wix.com's MCP endpoint completes its handshake in ~11.5s, so
+  # a fleet including it wants 20 and reports the server unwatched at 10.
+  #
+  # The cost of raising it is that a DEAD server also holds its probe slot for
+  # that long. Bounded concurrency (4) means that delays the sweep rather than
+  # serialising it, but it is not free.
+  probeTimeoutSeconds: 10
+
   # ── Catalog ingest ──────────────────────────────────────────────────────
   # Reads a customer's EXISTING object graph — Snowflake today, Databricks and
   # Glue to follow — and hands it to the orchestrator, which reconciles it into

@@ -55,6 +55,12 @@ spec:
             - name: MCP_INVENTORY_LISTEN_ADDR
               value: ":8090"
 
+            # ── Drift probe ───────────────────────────────────────────────
+            # Unset falls back to the Go default of 10s, so an older chart and
+            # a newer image agree without either knowing about the other.
+            - name: MCP_INVENTORY_PROBE_TIMEOUT_SECONDS
+              value: {{ .Values.inventory.probeTimeoutSeconds | default 10 | quote }}
+
             # ── DB connection ───────────────────────────────────────────
             - name: MCP_INVENTORY_DB_HOST
               value: {{ include "mcp.fullname" . }}-inventory-postgres
