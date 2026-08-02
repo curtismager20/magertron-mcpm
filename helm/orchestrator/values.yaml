@@ -1312,7 +1312,7 @@ inventory:
   # The cost of raising it is that a DEAD server also holds its probe slot for
   # that long. Bounded concurrency (4) means that delays the sweep rather than
   # serialising it, but it is not free.
-  probeTimeoutSeconds: 10
+  probeTimeoutSeconds: 20
 
   # ── Catalog ingest ──────────────────────────────────────────────────────
   # Reads a customer's EXISTING object graph — Snowflake today, Databricks and
