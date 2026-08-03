@@ -1296,6 +1296,33 @@ postgresql:
 # Default off so existing customer upgrades don't unexpectedly deploy a new
 # sidecar + Postgres. Dev clusters opt in via bootstrap.sh's --set or by
 # flipping this to true here (single values.yaml — no separate dev-values).
+# ── Security ───────────────────────────────────────────────────────────────
+security:
+  # Roles that may not be DELEGATED TO.
+  #
+  # An agent presenting an X-Magertron-On-Behalf-Of token for a principal
+  # holding one of these is refused outright — 403, with the role named.
+  #
+  # WHY THIS ONE CASE IS CARVED OUT
+  #
+  # A delegated call is bounded by the intersection of the agent and the person
+  # it acts for. That is weakest exactly where the stakes are highest: an agent
+  # acting for an administrator is limited by its own entitlements and little
+  # else, because the administrator's are broader. The second principal adds
+  # almost nothing, while the delegation creates the most valuable token in the
+  # system to steal.
+  #
+  # ⚠ ADD YOUR OWN. These defaults are Magertron's roles. A deployment with
+  # acme:superuser or platform:sre has an administrative role this list does
+  # not know about, and it will be delegable until you name it here.
+  #
+  # A chart value rather than a runtime policy, deliberately: changing it needs
+  # cluster access and leaves a trail in git. The person best placed to abuse
+  # this control is the one who would otherwise be turning it off in a console.
+  nonDelegableRoles:
+    - system:platform-admin
+    - system:operator
+
 inventory:
   enabled: true
   replicaCount: 1

@@ -298,6 +298,12 @@ spec:
             # Hardcoded to the standard port 8090 (matches inventory-service.yaml
             # template). If you ever need to change the port, update both the
             # service template and this env var together.
+            # Comma-separated. Unset falls back to the same two defaults
+            # compiled in, so an older chart against a newer image is still
+            # protected — it just cannot be adjusted without one.
+            - name: MCP_NON_DELEGABLE_ROLES
+              value: {{ join "," (.Values.security.nonDelegableRoles | default (list "system:platform-admin" "system:operator")) | quote }}
+
             - name: MCP_INVENTORY_URL
               value: "http://{{ include "mcp.fullname" . }}-inventory:8090"
             # MCP_INVENTORY_ADMIN_TOKEN — long-lived JWT (10y TTL, scope
