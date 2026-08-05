@@ -127,6 +127,32 @@ data:
         -- ── Timestamps ──────────────────────────────────────────────────────
         ts                TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
+    -- ── Prompt correlation (2026-08-04) ───────────────────────────────────
+    --
+    -- turn_id groups every call ONE user message caused: the model turns, the
+    -- tool calls they decided on, and both principals' catalog checks.
+    ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS turn_id  TEXT;
+    ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS is_model BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE meter_events ADD COLUMN IF NOT EXISTS turn_id  TEXT;
+    
+    -- The question a turn started, captured at the LLM proxy. OFF by default.
+    --
+    -- ⚠ A SEPARATE TABLE, not a column on audit_events: audit rows are
+    -- append-only and kept for years, reading them is a different capability
+    -- from reading what people typed, and the SIEM forwarder ships
+    -- audit_events — a column would arrive in Splunk the moment recording
+    -- was enabled.
+    CREATE TABLE IF NOT EXISTS prompt_texts (
+        turn_id      TEXT PRIMARY KEY,
+        session_id   TEXT        NOT NULL,
+        principal    TEXT        NOT NULL,
+        on_behalf_of TEXT,
+        prompt       TEXT        NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS prompt_texts_session_idx ON prompt_texts (session_id);
+    CREATE INDEX IF NOT EXISTS prompt_texts_created_idx ON prompt_texts (created_at DESC);
+    
     CREATE INDEX IF NOT EXISTS audit_events_ts_idx        ON audit_events (ts DESC);
     CREATE INDEX IF NOT EXISTS audit_events_actor_idx     ON audit_events (actor);
     CREATE INDEX IF NOT EXISTS audit_events_server_idx    ON audit_events (server_name, namespace);
