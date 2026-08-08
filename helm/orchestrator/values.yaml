@@ -1850,7 +1850,13 @@ api:
 
 # ─── JWT Configuration ──────────────────────────────────────────────────────
 jwt:
-  issuer: "https://auth.acme.internal"
+  # Empty by default: the orchestrator derives the issuer from this
+  # deployment's own public URL, so each install issues under its own
+  # identity rather than a shared placeholder.
+  #
+  # Set it explicitly only if you need a value that differs from the
+  # public URL. Changing it invalidates every token already issued.
+  issuer: ""
   audience: "mcp-orchestrator"
   clockSkew: 30
   tokenTTL: 3600
