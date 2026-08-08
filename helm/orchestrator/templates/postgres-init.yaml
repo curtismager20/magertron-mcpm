@@ -687,6 +687,15 @@ data:
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE sso_providers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    -- The audience an EXCHANGED token must carry, for token exchange.
+    --
+    -- Empty means this provider CANNOT be used for exchange — not that it
+    -- accepts any audience. A token minted for another service would
+    -- otherwise become a valid Magertron credential.
+    --
+    -- Defaults empty so an upgrade does not silently open every configured
+    -- IdP as a token oracle. An operator sets it deliberately.
+    ALTER TABLE sso_providers ADD COLUMN IF NOT EXISTS exchange_audience TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS sso_providers_enabled_idx
         ON sso_providers (enabled) WHERE enabled = TRUE;
 
