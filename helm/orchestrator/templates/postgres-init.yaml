@@ -620,6 +620,67 @@ data:
     );
     CREATE INDEX IF NOT EXISTS governance_policies_enabled_idx ON governance_policies (enabled);
 
+
+    -- ── LLM routing policies ──────────────────────────────────────────
+    --
+    -- Which model server a caller reaches when it asks for one WITHOUT
+    -- naming it:  POST /api/v1/llm/messages
+    --
+    -- The named route stays valid. A client naming a provider is making a
+    -- deliberate choice, and this table has nothing to say about it.
+    --
+    -- ⚠ Distinct from governance_policies above, which validates a
+    -- server's SPEC at registration. That answers 'is this allowed to
+    -- exist'; this answers 'who reaches it'.
+    CREATE TABLE IF NOT EXISTS llm_routing_policies (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name         VARCHAR(255) NOT NULL UNIQUE,
+        description  TEXT NOT NULL DEFAULT '',
+        -- Empty means 'any'. All three empty is the namespace-wide
+        -- default, which is legitimate and deliberate.
+        --
+        -- ⚠ SUBJECT ONLY. Namespace matching was dropped: a principal carries
+        -- no namespace, and the target server already has one. Role matching
+        -- too — a principal holds SEVERAL roles, so two role policies would
+        -- tie by construction. One dimension means no precedence rules and
+        -- no ties.
+    -- No role matching, deliberately: a principal holds SEVERAL roles, so
+    -- two role policies would tie by construction and the resolution
+    -- would depend on row order. Subject and namespace are both singular,
+    -- so a tie is impossible rather than merely handled.
+        -- No priority column: an operator reading 'matched on subject'
+        -- learns why; one reading 'policy 40 won' learns nothing.
+                match_subject    TEXT NOT NULL DEFAULT '',
+        -- ⚠ A SERVER, NOT A MODEL. One model per LLM server is enforced
+        -- and a duplicate within a namespace is blocked, so the
+        -- relationship is 1:1 and the model name is a query away.
+        --
+        -- ⚠ RESTRICT, never CASCADE: deleting a server that policies
+        -- still route to must fail loudly. A silently-vanishing route
+        -- sends callers to a refusal with no record of what changed.
+        target_server_id UUID NOT NULL
+            REFERENCES deployed_servers(id) ON DELETE RESTRICT,
+        -- ⚠ A disabled policy does NOT fall through to a less specific
+        -- match — it is out of consideration, and if nothing else
+        -- matches the call refuses. Falling through would mean
+        -- disabling a rule silently redirects traffic, which is the
+        -- opposite of what 'disabled' suggests.
+        enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_by   TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS llm_routing_policies_match_idx
+        ON llm_routing_policies (match_subject)
+        WHERE enabled;
+
+    -- ⚠ Two enabled policies with identical criteria are a configuration
+    -- error, not a precedence puzzle. Caught at write time rather than
+    -- resolved arbitrarily at 3am.
+    CREATE UNIQUE INDEX IF NOT EXISTS llm_routing_policies_unique_match
+        ON llm_routing_policies (match_subject)
+        WHERE enabled;
     -- ── Image scans (deploy-time vulnerability scanning; SOC2 vuln-mgmt evidence) ─
     -- Records every deploy-time image scan. Evidence-shaped: carries the image
     -- DIGEST (auditor-grade identity, not just a mutable tag), the scanner used,
