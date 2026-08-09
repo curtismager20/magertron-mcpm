@@ -547,9 +547,20 @@ data:
     -- (ambiguous routing + billing, same rationale as External). Recreate the
     -- partial index with a widened predicate; name unchanged to avoid dangling
     -- references. DROP+CREATE (not IF NOT EXISTS) because the predicate changes.
+    -- ⚠ The key includes the MODEL. One vendor URL serves many models —
+    -- api.anthropic.com answers for Sonnet, Haiku and Opus alike — so keying
+    -- on the endpoint alone made an estate choose ONE Anthropic model, which
+    -- defeats one-model-per-server for the vendors it matters most for.
+    --
+    -- The guarantee survives: same endpoint AND same model is still refused,
+    -- which is the duplicate that would let traffic route around a contract.
+    --
+    -- COALESCE, because servers registered before the model field existed have
+    -- no label; they collapse to '' and behave exactly as before.
     DROP INDEX IF EXISTS deployed_servers_external_endpoint_unique_idx;
     CREATE UNIQUE INDEX deployed_servers_external_endpoint_unique_idx
-        ON deployed_servers (namespace, endpoint_url)
+        ON deployed_servers (namespace, endpoint_url,
+                             COALESCE(labels->>'model', ''))
         WHERE server_type IN ('external', 'rest');
 
     -- ── External MCP server architecture (session 2.13) ──────────────────────
