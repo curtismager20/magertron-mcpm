@@ -1979,6 +1979,21 @@ data:
      '["*"]', TRUE)
     ON CONFLICT (id) DO NOTHING;
 
+    -- Model comparison. Held only by the synthetic 'system-compare' subject
+    -- the orchestrator signs for when an admin runs a side-by-side.
+    --
+    -- ⚠ Reaches EVERY model server, by design: a comparison that silently
+    -- omits a model an operator has registered is worse than no comparison.
+    -- Grants are inserted automatically when an LLM server is registered.
+    --
+    -- ⚠ NON-DELEGABLE (see MCP_NON_DELEGABLE_ROLES). An agent acting as this
+    -- would reach models its own routing policy forbids.
+    INSERT INTO roles (id, name, description, permissions, allowed_namespaces, system_role) VALUES
+    ('system:model-compare', 'Model Comparison', 'Internal role for side-by-side model cost comparison. Held only by the synthetic system-compare subject, never by a user or a stored service account. Reaches every registered LLM provider.',
+     '["Read"]',
+     '["*"]', TRUE)
+    ON CONFLICT (id) DO NOTHING;
+
     INSERT INTO roles (id, name, description, permissions, allowed_namespaces, system_role) VALUES
     ('system:api-consumer', 'API Consumer', 'Service-account role for daemons/agents that call governed, metered REST APIs. Access to each API is granted explicitly per-provider; the role alone grants nothing.',
      '["Read"]',
