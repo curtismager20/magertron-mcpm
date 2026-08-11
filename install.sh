@@ -868,10 +868,6 @@ if [ -z "$LICENSE_FILE" ]; then
         echo "      --from-file=license.json=/path/to/license.json -n $NAMESPACE"
         echo "    kubectl rollout restart deployment/mcp-orchestrator -n $NAMESPACE"
     fi
-elif [ "$MODE" = "upgrade" ] && kubectl get secret -n "$NAMESPACE" mcp-license >/dev/null 2>&1; then
-    echo "  License secret already exists, leaving as-is (mode=upgrade)."
-    echo "  To replace, delete the secret first:"
-    echo "    kubectl delete secret -n $NAMESPACE mcp-license"
 else
     kubectl delete secret -n "$NAMESPACE" mcp-license --ignore-not-found 2>/dev/null || true
     kubectl create secret generic mcp-license \
