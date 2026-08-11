@@ -52,7 +52,7 @@
     {
       "@type": "Offer",
       "name": "Open Source",
-      "description": "Free forever, Apache 2.0. Up to 20 MCP servers, live metrics, and LLM calls by name.",
+      "description": "Free forever, Apache 2.0. Up to 20 MCP servers.",
       "price": "0",
       "priceCurrency": "USD",
       "category": "Free"
@@ -1301,15 +1301,12 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         <ul class="pricing-features">
           <li>Deploy and manage MCP servers</li>
           <li>Health monitoring &amp; metrics</li>
-          <li>Live metrics charts</li>
           <li>Envoy gateway with xDS</li>
           <li>Helm chart deployment</li>
           <li>CLI tool (mcpctl) — Apache 2.0</li>
           <li>Basic RBAC (admin + viewer)</li>
-          <li>Call LLM models by name through the gateway</li>
           <li>Community support via GitHub</li>
-          <li class="disabled">Model routing policy</li>
-          <li class="disabled">Cost metering &amp; chargeback</li>
+          <li class="disabled">Live metrics charts</li>
           <li class="disabled">Namespace isolation</li>
           <li class="disabled">SSO &amp; SCIM provisioning</li>
           <li class="disabled">Governance policies</li>
@@ -1326,23 +1323,20 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Up to 50 MCP servers · For a single team running their own servers</div>
         <div class="pricing-divider"></div>
         <ul class="pricing-features">
-          <li><strong>Everything in Free, plus:</strong></li>
-          <li><strong>Model routing</strong> — policy decides which model a caller reaches</li>
-          <li>Cost metering, departments &amp; chargeback reports</li>
-          <li>Agent Galaxy — live entitlement graph</li>
-          <li>Rug-pull protection &amp; quarantine kill switch</li>
-          <li>SSO (OIDC &amp; SAML) — Okta, Azure AD, Google</li>
-          <li>SCIM 2.0 user provisioning</li>
-          <li>Governance policy engine</li>
-          <li>Multi-tenant namespace isolation</li>
+          <li>Everything in Free, plus:</li>
+          <li>Live metrics charts</li>
           <li>Deployment history &amp; rollback</li>
+          <li>Multiple namespaces</li>
           <li>Webhook notifications (Slack, email)</li>
           <li>Audit trail</li>
           <li>Custom RBAC roles</li>
+          <li>Rug-pull protection</li>
           <li>Priority email &amp; Slack support</li>
-          <li class="disabled">Model comparison</li>
-          <li class="disabled">Unity Catalog (AI Data Reach)</li>
-          <li class="disabled">Delegated administration</li>
+          <li class="disabled">SSO (OIDC &amp; SAML)</li>
+          <li class="disabled">SCIM 2.0 &amp; JIT provisioning</li>
+          <li class="disabled">Governance policy engine</li>
+          <li class="disabled">Multi-tenant namespace isolation</li>
+          <li class="disabled">Advanced telemetry (SIEM/Datadog/Splunk)</li>
         </ul>
         <a href="#" class="pricing-btn primary" onclick="openDemoModal(event)">Schedule a Demo →</a>
       </div>
@@ -1355,23 +1349,21 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Unlimited servers · For identity, compliance &amp; platform teams</div>
         <div class="pricing-divider"></div>
         <ul class="pricing-features">
-          <li><strong>Everything in Pro, plus:</strong></li>
-          <li><strong>Unity Catalog integration</strong> — Databricks governance, blast-radius analysis, grant simulation</li>
-          <li><strong>Model comparison</strong> — one prompt across models, cost side by side</li>
-          <li>Delegated administration</li>
-          <li>Governance policy export</li>
-          <li>Unlimited servers</li>
+          <li>Everything in Pro, plus:</li>
+          <li>SSO (OIDC &amp; SAML) — Okta, Azure AD, Google</li>
+          <li>SCIM 2.0 automated user provisioning</li>
+          <li>Just-in-time user provisioning on first login</li>
+          <li>Governance policy engine</li>
+          <li>Quarantine kill switch &amp; bulk approvals</li>
+          <li>Multi-tenant namespace isolation</li>
+          <li>Advanced telemetry (SIEM, Datadog, Splunk)</li>
+          <li>Governance policy export/import</li>
+          <li>Multi-cluster federation</li>
+          <li>Air-gapped deployment</li>
           <li>Priority support with SLA</li>
+          <li>Dedicated onboarding &amp; custom integrations</li>
+          <li>Custom procurement (PO, MSA, security review)</li>
         </ul>
-        <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border-subtle,#333);">
-          <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;">On the roadmap</div>
-          <ul class="pricing-features" style="opacity:.72;">
-            <li>Multi-cluster federation</li>
-            <li>Governance policy import</li>
-            <li>Bulk approvals</li>
-            <li>Just-in-time provisioning</li>
-          </ul>
-        </div>
         <a href="#" class="pricing-btn secondary" onclick="openDemoModal(event)">Contact sales →</a>
       </div>
     </div>
