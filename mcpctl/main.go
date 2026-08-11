@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,6 +91,11 @@ type globalFlags struct {
 	insecure bool
 	caCert   string
 	jsonOut  bool
+	// ⚠ Set ONLY by `login --token`, to prove a candidate credential before it
+	// is written to disk. apiRequest honours it in place of loadConfig().
+	// Without this the probe would validate the PREVIOUS token and happily save
+	// a broken one — the failure this whole change exists to prevent.
+	cfgOverride *Config
 }
 
 // stripGlobalFlags walks os.Args and pulls out --insecure / -k, --ca-cert,
@@ -167,6 +173,10 @@ func buildHTTPClient(cfg Config, gf globalFlags) (*http.Client, error) {
 // arrays (e.g. /api/v1/servers returns a JSON array directly).
 func apiRequest(gf globalFlags, method, path string, body interface{}) ([]byte, int, error) {
 	cfg := loadConfig()
+	// ⚠ A candidate credential under test — see globalFlags.cfgOverride.
+	if gf.cfgOverride != nil {
+		cfg = *gf.cfgOverride
+	}
 	if cfg.Server == "" {
 		return nil, 0, errors.New("not configured — run: mcpctl login <server-url> <username> <password>")
 	}
@@ -211,6 +221,31 @@ func apiRequest(gf globalFlags, method, path string, body interface{}) ([]byte, 
 // extractErrorMessage tries to pull a meaningful error message out of an
 // error response body. Orchestrator returns either {"error": "..."} or
 // occasionally {"detail": "..."}; fall through to the raw body if neither.
+// extractLicenseHint returns a human next-step for a 402 Payment Required.
+// ⚠ The server sends feature, tier_required and upgrade_url alongside the error;
+// printing only the error throws away the two fields that tell someone what to
+// actually DO about it.
+func extractLicenseHint(body []byte) string {
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	feat, _ := m["feature"].(string)
+	tier, _ := m["tier_required"].(string)
+	url, _ := m["upgrade_url"].(string)
+	if feat == "" && tier == "" {
+		return ""
+	}
+	out := "\n"
+	if feat != "" && tier != "" {
+		out += fmt.Sprintf("  '%s' requires the %s tier.\n", feat, strings.Title(tier))
+	}
+	if url != "" {
+		out += fmt.Sprintf("  See %s\n", url)
+	}
+	return out
+}
+
 func extractErrorMessage(body []byte) string {
 	var m map[string]interface{}
 	if err := json.Unmarshal(body, &m); err == nil {
@@ -233,7 +268,7 @@ func apiGet(gf globalFlags, path string) ([]byte, error) {
 		return nil, err
 	}
 	if status >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", status, extractErrorMessage(body))
+		return nil, fmt.Errorf("HTTP %d: %s%s", status, extractErrorMessage(body), extractLicenseHint(body))
 	}
 	return body, nil
 }
@@ -244,7 +279,7 @@ func apiPost(gf globalFlags, path string, in interface{}) ([]byte, error) {
 		return nil, err
 	}
 	if status >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", status, extractErrorMessage(body))
+		return nil, fmt.Errorf("HTTP %d: %s%s", status, extractErrorMessage(body), extractLicenseHint(body))
 	}
 	return body, nil
 }
@@ -255,7 +290,7 @@ func apiDelete(gf globalFlags, path string) error {
 		return err
 	}
 	if status >= 400 {
-		return fmt.Errorf("HTTP %d: %s", status, extractErrorMessage(body))
+		return fmt.Errorf("HTTP %d: %s%s", status, extractErrorMessage(body), extractLicenseHint(body))
 	}
 	return nil
 }
@@ -263,9 +298,36 @@ func apiDelete(gf globalFlags, path string) error {
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 func cmdLogin(gf globalFlags, args []string) {
+	// ── Service-account login ────────────────────────────────────────────
+	// ⚠ A service account holds a signed JWT, not a password. There is nothing
+	// to POST to /auth/login — the credential IS the session. So this path
+	// skips the login endpoint entirely and stores the token.
+	//
+	// ⚠ MFA is therefore never reached, and that is correct rather than a
+	// loophole: MFA is a control on human authentication. A machine identity
+	// has no second factor to present; its protection is that the credential is
+	// scoped, attributable and revocable.
+	for i, a := range args {
+		if a == "--token" {
+			if i+1 >= len(args) || len(args) < 1 {
+				fmt.Fprintln(os.Stderr, "Error: --token requires a value")
+				os.Exit(1)
+			}
+			if i == 0 {
+				fmt.Fprintln(os.Stderr, "Error: server URL must come first")
+				fmt.Fprintln(os.Stderr, "  mcpctl login <server-url> --token <token>")
+				os.Exit(1)
+			}
+			cmdLoginToken(gf, strings.TrimRight(args[0], "/"), args[i+1])
+			return
+		}
+	}
+
 	if len(args) < 3 {
 		fmt.Println("Usage: mcpctl login <server-url> <username> <password>")
+		fmt.Println("       mcpctl login <server-url> --token <service-account-token>")
 		fmt.Println("Example: mcpctl login https://localhost:30443 admin admin --insecure")
+		fmt.Println("         mcpctl login https://localhost:30443 --token eyJhbGc... --insecure")
 		fmt.Println()
 		fmt.Println("Notes:")
 		fmt.Println("  Default Magertron gateway is HTTPS on port 30443.")
@@ -344,7 +406,38 @@ func cmdLogin(gf globalFlags, args []string) {
 		os.Exit(1)
 	}
 
-	token, _ := result["token"].(string)
+	// ⚠ A 200 WITHOUT A TOKEN IS NOT A LOGIN. Previously the comma-ok was
+	// discarded here, so an absent token became "", the config was written, and
+	// the CLI printed a tick — leaving every later command to fail with an
+	// unexplained 401.
+	token, ok := result["token"].(string)
+	if !ok || token == "" {
+		// The case that actually occurs: two-phase MFA. The server answers 200
+		// with {"mfa_required":true,"pending":"..."} because authentication has
+		// only STARTED — it completes through the IdP in a browser.
+		if mfa, _ := result["mfa_required"].(bool); mfa {
+			fmt.Fprintf(os.Stderr, "Login failed: %s requires multi-factor authentication.\n\n", username)
+			fmt.Fprintln(os.Stderr, "  MFA completes through your identity provider in a browser, so it")
+			fmt.Fprintln(os.Stderr, "  cannot be finished from the command line.")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "  The CLI is intended for SERVICE ACCOUNTS. Create one in the console")
+			fmt.Fprintln(os.Stderr, "  (Users -> Service Accounts) and log in with its credentials — that is")
+			fmt.Fprintln(os.Stderr, "  also the right identity for automation: it is attributable, scoped,")
+			fmt.Fprintln(os.Stderr, "  and revocable without touching a person's account.")
+		} else {
+			// ⚠ Any other tokenless 200. Do not guess at a cause — say exactly
+			// what was and was not received.
+			fmt.Fprintf(os.Stderr, "Login failed: the server accepted the request (HTTP %d) but returned no session token.\n", resp.StatusCode)
+			if msg, _ := result["error"].(string); msg != "" {
+				fmt.Fprintf(os.Stderr, "  Server said: %s\n", msg)
+			}
+			fmt.Fprintln(os.Stderr, "  Nothing has been saved; you are not logged in.")
+		}
+		// ⚠ Exit BEFORE saveConfig. Writing an empty token is what turned a
+		// clear failure into a confusing one.
+		os.Exit(1)
+	}
+
 	cfg := Config{
 		Server:   server,
 		Token:    token,
@@ -368,10 +461,14 @@ func cmdLogin(gf globalFlags, args []string) {
 		os.Exit(1)
 	}
 
+	// ⚠ Printed as "Logged in as admin ()" when roles were absent — an empty
+	// bracket reads like a bug rather than an absence. Omit it instead.
 	roles, _ := result["roles"].([]interface{})
-	roleStrs := make([]string, len(roles))
-	for i, r := range roles {
-		roleStrs[i], _ = r.(string)
+	roleStrs := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if rs, ok := r.(string); ok && rs != "" {
+			roleStrs = append(roleStrs, rs)
+		}
 	}
 
 	fmt.Printf("✓ Logged in as %s (%s)\n", username, strings.Join(roleStrs, ", "))
@@ -1449,7 +1546,7 @@ func apiPut(gf globalFlags, path string, in interface{}) ([]byte, error) {
 		return nil, err
 	}
 	if status >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", status, extractErrorMessage(body))
+		return nil, fmt.Errorf("HTTP %d: %s%s", status, extractErrorMessage(body), extractLicenseHint(body))
 	}
 	return body, nil
 }
@@ -2470,6 +2567,12 @@ func main() {
 		cmdOrgs(gf, cmdArgs)
 	case "service-accounts", "sa":
 		cmdServiceAccounts(gf, cmdArgs)
+	case "cost", "billing":
+		cmdCost(gf, cmdArgs)
+	case "departments", "depts":
+		cmdDepartments(gf, cmdArgs)
+	case "routing", "routes":
+		cmdRouting(gf, cmdArgs)
 	case "webhooks":
 		cmdWebhooks(gf, cmdArgs)
 	case "retention":
@@ -2482,4 +2585,552 @@ func main() {
 		fmt.Printf("Unknown command: %s\nRun 'mcpctl help' for usage.\n", cmd)
 		os.Exit(1)
 	}
+}
+
+
+
+// str safely extracts a string from a map[string]interface{} value.
+// ⚠ Returns "" for nil or non-string rather than panicking — API responses
+// carry nulls for joined columns whose target no longer exists.
+func str(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+// ─── Model routing policies ──────────────────────────────────────────────────
+//
+// ⚠ Routing is a CONTROL, not a convenience. A caller with no policy is refused;
+// there is no silent default. A caller naming a different model than policy
+// allows is refused rather than substituted — an answer attributed to a model
+// that never saw the prompt is worse than no answer.
+//
+// Pro tier. A Free licence gets 402 with the tier and upgrade URL.
+
+func cmdRouting(gf globalFlags, args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: mcpctl routing <list|get|create|delete> [args]")
+		os.Exit(1)
+	}
+	sub := args[0]
+	rest := args[1:]
+
+	switch sub {
+	case "list", "ls":
+		cmdRoutingList(gf)
+	case "get":
+		if len(rest) < 1 {
+			fmt.Println("Usage: mcpctl routing get <id>")
+			os.Exit(1)
+		}
+		cmdRoutingGet(gf, rest[0])
+	case "create":
+		cmdRoutingCreate(gf, rest)
+	case "delete", "rm":
+		if len(rest) < 1 {
+			fmt.Println("Usage: mcpctl routing delete <id>")
+			os.Exit(1)
+		}
+		cmdRoutingDelete(gf, rest[0])
+	default:
+		fmt.Printf("Unknown routing subcommand: %s\n", sub)
+		os.Exit(1)
+	}
+}
+
+func cmdRoutingList(gf globalFlags) {
+	body, err := apiGet(gf, "/llm/routing-policies")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		return
+	}
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	if len(resp.Items) == 0 {
+		// ⚠ Say what the absence MEANS. No policies is not an empty list, it is
+		// a posture: every unnamed call is refused.
+		fmt.Println("No routing policies. Callers must name a model server explicitly;")
+		fmt.Println("a call to /api/v1/llm/messages without one is refused.")
+		return
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tCALLER\tTARGET\tMODEL\tENABLED")
+	for _, r := range resp.Items {
+		model := str(r["target_model"])
+		if model == "" {
+			// ⚠ A target with no model label cannot serve a routed call — the
+			// proxy has nothing to fill in. Worth flagging, not blanking.
+			model = "(none — routed calls fail)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s/%s\t%s\t%v\n",
+			str(r["name"]), str(r["match_subject"]),
+			str(r["target_namespace"]), str(r["target_server_name"]),
+			model, r["enabled"])
+	}
+	tw.Flush()
+}
+
+func cmdRoutingGet(gf globalFlags, id string) {
+	body, err := apiGet(gf, "/llm/routing-policies")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	_ = json.Unmarshal(body, &resp)
+	for _, r := range resp.Items {
+		if str(r["id"]) == id || str(r["name"]) == id {
+			if gf.jsonOut {
+				emitJSON(r)
+				return
+			}
+			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintf(tw, "Name:\t%s\n", str(r["name"]))
+			fmt.Fprintf(tw, "Caller:\t%s\n", str(r["match_subject"]))
+			fmt.Fprintf(tw, "Target:\t%s/%s\n", str(r["target_namespace"]), str(r["target_server_name"]))
+			fmt.Fprintf(tw, "Model:\t%s\n", str(r["target_model"]))
+			fmt.Fprintf(tw, "Enabled:\t%v\n", r["enabled"])
+			fmt.Fprintf(tw, "Description:\t%s\n", str(r["description"]))
+			fmt.Fprintf(tw, "Created by:\t%s\n", str(r["created_by"]))
+			fmt.Fprintf(tw, "Created:\t%s\n", str(r["created_at"]))
+			fmt.Fprintf(tw, "Id:\t%s\n", str(r["id"]))
+			tw.Flush()
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "No routing policy matching %q\n", id)
+	os.Exit(1)
+}
+
+func cmdRoutingCreate(gf globalFlags, args []string) {
+	var subject, target, name, desc string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--caller", "--subject":
+			if i+1 < len(args) {
+				subject = args[i+1]
+				i++
+			}
+		case "--target", "--server-id":
+			if i+1 < len(args) {
+				target = args[i+1]
+				i++
+			}
+		case "--name":
+			if i+1 < len(args) {
+				name = args[i+1]
+				i++
+			}
+		case "--description", "--desc":
+			if i+1 < len(args) {
+				desc = args[i+1]
+				i++
+			}
+		}
+	}
+	if subject == "" || target == "" {
+		fmt.Println("Usage: mcpctl routing create --caller <subject> --target <server-id> [--name <n>] [--description <why>]")
+		fmt.Println()
+		fmt.Println("  --target takes a model server ID. Find one with: mcpctl servers")
+		os.Exit(1)
+	}
+	if name == "" {
+		name = subject + " route"
+	}
+	payload := map[string]interface{}{
+		"name":             name,
+		"match_subject":    subject,
+		"target_server_id": target,
+	}
+	// ⚠ Omit rather than send "" — the description is the only place the REASON
+	// for a route is recorded, and an empty string is not the same as absent.
+	if desc != "" {
+		payload["description"] = desc
+	}
+	if _, err := apiPost(gf, "/llm/routing-policies", payload); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Routing policy created: %s -> %s\n", subject, target)
+	if desc == "" {
+		fmt.Println("  (no description — consider --description, it is the only record of why)")
+	}
+}
+
+func cmdRoutingDelete(gf globalFlags, id string) {
+	// ⚠ Deleting a route is a TRAFFIC change, not a tidy-up: the caller it
+	// served has no route afterwards and its next unnamed call is refused.
+	if err := apiDelete(gf, "/llm/routing-policies/"+id); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Routing policy %s deleted.\n", id)
+	fmt.Println("  That caller now has no model route; its next unnamed call will be refused.")
+}
+
+
+// ─── Cost & chargeback ───────────────────────────────────────────────────────
+//
+// Pro tier (COST_MANAGEMENT). Reads rated_costs — the rating engine's output,
+// not a recompute — so a CLI figure and the dashboard figure are the same
+// number by construction rather than by coincidence.
+
+func cmdCost(gf globalFlags, args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: mcpctl cost report [--view <v>] [--from YYYY-MM-01] [--to YYYY-MM-01] [--server-id <id>]")
+		fmt.Println()
+		fmt.Println("  --view  full | vendor | department | user | service_account   (default: department)")
+		fmt.Println("  --from  inclusive month start   (default: current month)")
+		fmt.Println("  --to    EXCLUSIVE month start   (default: next month)")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "report", "rpt":
+		cmdCostReport(gf, args[1:])
+	default:
+		fmt.Printf("Unknown cost subcommand: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func cmdCostReport(gf globalFlags, args []string) {
+	view, from, to, serverID := "", "", "", ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--view":
+			if i+1 < len(args) { view = args[i+1]; i++ }
+		case "--from":
+			if i+1 < len(args) { from = args[i+1]; i++ }
+		case "--to":
+			if i+1 < len(args) { to = args[i+1]; i++ }
+		case "--server-id", "--vendor":
+			if i+1 < len(args) { serverID = args[i+1]; i++ }
+		}
+	}
+
+	// ⚠ THE HALF-OPEN RANGE TRAP. --from 2026-08-01 --to 2026-08-01 is an EMPTY
+	// interval and returns zero — which reads as "we spent nothing" rather than
+	// "you asked for nothing". Catch it here; the server cannot tell the
+	// difference between a deliberate empty range and a mistake.
+	if from != "" && to != "" && from == to {
+		fmt.Fprintf(os.Stderr,
+			"Error: --from and --to are identical (%s), which is an EMPTY range.\n"+
+				"  The range is half-open: --to is EXCLUSIVE.\n"+
+				"  For the month of %s, use --to %s\n",
+			from, from[:7], nextMonth(from))
+		os.Exit(1)
+	}
+
+	q := []string{}
+	if view != "" { q = append(q, "view="+view) }
+	if from != "" { q = append(q, "from="+from) }
+	if to != "" { q = append(q, "to="+to) }
+	if serverID != "" { q = append(q, "server_id="+serverID) }
+	path := "/billing/report"
+	if len(q) > 0 { path += "?" + strings.Join(q, "&") }
+
+	body, err := apiGet(gf, path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		return
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	// ⚠ Echo the bounds the SERVER used, not the ones asked for. It defaults
+	// when they are omitted, and a statement whose period is implicit is a
+	// statement somebody will misread.
+	if f, ok := resp["from"]; ok {
+		fmt.Printf("Period: %v to %v (exclusive)\n\n", f, resp["to"])
+	}
+	rows, _ := resp["rows"].([]interface{})
+	if len(rows) == 0 {
+		fmt.Println("No rated costs in this period.")
+		fmt.Println("  Costs are rated periodically — very recent usage may not have settled yet.")
+		return
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	printed := false
+	for _, r := range rows {
+		m, ok := r.(map[string]interface{})
+		if !ok { continue }
+		if !printed {
+			fmt.Fprintln(tw, "SUBJECT\tAMOUNT (USD)")
+			printed = true
+		}
+		label := str(m["department"])
+		for _, k := range []string{"user", "service_account", "vendor", "server_name", "name"} {
+			if label == "" { label = str(m[k]) }
+		}
+		if label == "" { label = "(unattributed)" }
+		fmt.Fprintf(tw, "%s\t%v\n", label, m["amount_usd"])
+	}
+	tw.Flush()
+	if total, ok := resp["total_usd"]; ok {
+		fmt.Printf("\nTotal: %v USD\n", total)
+	}
+}
+
+// nextMonth turns YYYY-MM-01 into the following YYYY-MM-01, for the half-open
+// hint above.
+func nextMonth(p string) string {
+	if len(p) < 7 { return p }
+	var y, m int
+	if _, err := fmt.Sscanf(p[:7], "%d-%d", &y, &m); err != nil { return p }
+	if m == 12 { y, m = y+1, 1 } else { m++ }
+	return fmt.Sprintf("%04d-%02d-01", y, m)
+}
+
+// ─── Departments ─────────────────────────────────────────────────────────────
+//
+// ⚠ Departments are what make a chargeback report readable. Without them every
+// figure lands in "(unattributed)" — which is a working report that tells
+// nobody anything.
+
+func cmdDepartments(gf globalFlags, args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: mcpctl departments <list|get|create|members> [args]")
+		os.Exit(1)
+	}
+	sub := args[0]
+	rest := args[1:]
+	switch sub {
+	case "list", "ls":
+		cmdDepartmentsList(gf)
+	case "get":
+		if len(rest) < 1 {
+			fmt.Println("Usage: mcpctl departments get <id>")
+			os.Exit(1)
+		}
+		cmdDepartmentsGet(gf, rest[0])
+	case "create":
+		cmdDepartmentsCreate(gf, rest)
+	case "members":
+		if len(rest) < 1 {
+			fmt.Println("Usage: mcpctl departments members <id>")
+			os.Exit(1)
+		}
+		cmdDepartmentsMembers(gf, rest[0])
+	default:
+		fmt.Printf("Unknown departments subcommand: %s\n", sub)
+		os.Exit(1)
+	}
+}
+
+func cmdDepartmentsList(gf globalFlags) {
+	body, err := apiGet(gf, "/departments")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		return
+	}
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	if len(resp.Items) == 0 {
+		fmt.Println("No departments defined.")
+		fmt.Println("  Every cost in a chargeback report will show as (unattributed) until")
+		fmt.Println("  departments exist and callers are assigned to them.")
+		return
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tID\tCOST CENTRE")
+	for _, d := range resp.Items {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", str(d["name"]), str(d["id"]), str(d["cost_center"]))
+	}
+	tw.Flush()
+}
+
+func cmdDepartmentsGet(gf globalFlags, id string) {
+	body, err := apiGet(gf, "/departments/"+id)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		return
+	}
+	fmt.Println(string(body))
+}
+
+func cmdDepartmentsMembers(gf globalFlags, id string) {
+	body, err := apiGet(gf, "/departments/"+id+"/members")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		return
+	}
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	if len(resp.Items) == 0 {
+		fmt.Println("No members. Costs for this department will be empty.")
+		return
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "SUBJECT\tFROM\tTO")
+	for _, m := range resp.Items {
+		to := str(m["effective_to"])
+		if to == "" { to = "(current)" }
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", str(m["subject"]), str(m["effective_from"]), to)
+	}
+	tw.Flush()
+}
+
+func cmdDepartmentsCreate(gf globalFlags, args []string) {
+	var name, costCenter string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--name":
+			if i+1 < len(args) { name = args[i+1]; i++ }
+		case "--cost-center", "--cost-centre":
+			if i+1 < len(args) { costCenter = args[i+1]; i++ }
+		}
+	}
+	if name == "" {
+		fmt.Println("Usage: mcpctl departments create --name <name> [--cost-center <cc>]")
+		os.Exit(1)
+	}
+	payload := map[string]interface{}{"name": name}
+	if costCenter != "" { payload["cost_center"] = costCenter }
+	if _, err := apiPost(gf, "/departments", payload); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Department created: %s\n", name)
+}
+
+
+// cmdLoginToken stores a pre-minted service-account token, after proving it works.
+//
+// ⚠ VALIDATE BEFORE SAVING. Writing an unverified token reproduces the exact
+// failure this change follows: a config file that looks like a session, and
+// every later command returning 401 with nothing to explain it. One call to a
+// cheap authenticated endpoint settles it.
+func cmdLoginToken(gf globalFlags, server, token string) {
+	if strings.TrimSpace(token) == "" {
+		fmt.Fprintln(os.Stderr, "Error: empty token")
+		os.Exit(1)
+	}
+
+	probe := Config{
+		Server:   server,
+		Token:    token,
+		Insecure: gf.insecure,
+		CACert:   gf.caCert,
+	}
+	gfProbe := gf
+	gfProbe.cfgOverride = &probe
+
+	body, err := apiGet(gfProbe, "/auth/me")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Token rejected: %v\n\n", err)
+		fmt.Fprintln(os.Stderr, "  Nothing has been saved. Check that:")
+		fmt.Fprintln(os.Stderr, "    - the token was copied whole (they are long, and truncation is silent)")
+		fmt.Fprintln(os.Stderr, "    - the service account has not been revoked or expired")
+		fmt.Fprintln(os.Stderr, "    - the server URL is the one that issued it")
+		os.Exit(1)
+	}
+
+	if err := saveConfig(probe); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	subject := ""
+	var me map[string]interface{}
+	if json.Unmarshal(body, &me) == nil {
+		subject = str(me["subject"])
+		if subject == "" {
+			subject = str(me["username"])
+		}
+	}
+	if subject == "" {
+		subject = "service account"
+	}
+	fmt.Printf("✓ Authenticated as %s\n", subject)
+	fmt.Printf("  Server: %s\n", server)
+	fmt.Printf("  Config: %s\n", configPath())
+	if gf.insecure {
+		fmt.Println("  TLS:    insecure (skipping cert verification)")
+	}
+	// ⚠ Say when it dies. A token that silently expires mid-pipeline is a CI
+	// failure nobody can read; knowing the date turns it into a calendar entry.
+	if exp := jwtExpiry(token); exp != "" {
+		fmt.Printf("  Expires: %s\n", exp)
+	}
+}
+
+// jwtExpiry reads `exp` from a JWT payload without verifying the signature —
+// ⚠ display only. The server is the only thing that decides whether a token is
+// valid; this is a courtesy, not a check.
+func jwtExpiry(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	seg := parts[1]
+	if m := len(seg) % 4; m != 0 {
+		seg += strings.Repeat("=", 4-m)
+	}
+	raw, err := base64.URLEncoding.DecodeString(seg)
+	if err != nil {
+		return ""
+	}
+	var claims map[string]interface{}
+	if json.Unmarshal(raw, &claims) != nil {
+		return ""
+	}
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return ""
+	}
+	return time.Unix(int64(exp), 0).UTC().Format("2006-01-02 15:04 UTC")
 }
