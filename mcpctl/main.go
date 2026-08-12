@@ -2567,6 +2567,8 @@ func main() {
 		cmdOrgs(gf, cmdArgs)
 	case "service-accounts", "sa":
 		cmdServiceAccounts(gf, cmdArgs)
+	case "inventory", "inv":
+		cmdInventory(gf, cmdArgs)
 	case "cost", "billing":
 		cmdCost(gf, cmdArgs)
 	case "departments", "depts":
@@ -3152,4 +3154,217 @@ func jwtExpiry(token string) string {
 		return ""
 	}
 	return time.Unix(int64(exp), 0).UTC().Format("2006-01-02 15:04 UTC")
+}
+
+
+// ─── Inventory / tool-definition drift ───────────────────────────────────────
+//
+// ⚠ Two statuses that look similar and mean different things:
+//
+//   pending  — first sighting of a tool. Nobody has approved it yet. Expected
+//              when a server is deployed; it is new surface, not a betrayal.
+//   drifted  — an APPROVED tool whose definition hash changed. This is the
+//              rug-pull: something you vetted is no longer what you vetted.
+//
+// The default list returns both, because both need a human. But a CI gate that
+// fails on `pending` fails every time anyone deploys anything, and a gate that
+// cries wolf gets removed. So --fail-on-drift means drifted only.
+
+func cmdInventory(gf globalFlags, args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: mcpctl inventory <list|probe|approve|reject|quarantine> [args]")
+		fmt.Println()
+		fmt.Println("  list       tools awaiting review (pending + drifted by default)")
+		fmt.Println("  probe      force a drift probe for one server, now")
+		fmt.Println("  approve    accept the observed definition as the new baseline")
+		fmt.Println("  reject     refuse the observed definition")
+		fmt.Println("  quarantine kill switch — block the tool outright")
+		os.Exit(1)
+	}
+	sub := args[0]
+	rest := args[1:]
+
+	switch sub {
+	case "list", "ls":
+		cmdInventoryList(gf, rest)
+	case "probe":
+		if len(rest) < 1 {
+			fmt.Println("Usage: mcpctl inventory probe <namespace>/<server>")
+			os.Exit(1)
+		}
+		cmdInventoryProbe(gf, rest[0])
+	case "approve":
+		cmdInventoryAction(gf, rest, "approve",
+			"accepted as the new baseline")
+	case "reject":
+		cmdInventoryAction(gf, rest, "reject",
+			"rejected")
+	case "quarantine":
+		cmdInventoryAction(gf, rest, "quarantine",
+			"QUARANTINED — the tool is blocked estate-wide")
+	default:
+		fmt.Printf("Unknown inventory subcommand: %s\n", sub)
+		os.Exit(1)
+	}
+}
+
+func cmdInventoryList(gf globalFlags, args []string) {
+	status := ""
+	failOnDrift, failOnPending := false, false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--status":
+			if i+1 < len(args) { status = args[i+1]; i++ }
+		case "--drifted":
+			status = "drifted"
+		case "--fail-on-drift":
+			failOnDrift = true
+		case "--fail-on-pending":
+			failOnPending = true
+		}
+	}
+
+	path := "/inventory/tools"
+	if status != "" {
+		path += "?status=" + status
+	}
+	body, err := apiGet(gf, path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		// ⚠ Still honour the exit code in --json mode: a pipeline that parses
+		// the output should not also have to interpret it.
+		exitOnDrift(body, failOnDrift, failOnPending)
+		return
+	}
+
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+		Tools []map[string]interface{} `json:"tools"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		fmt.Println(string(body))
+		return
+	}
+	rows := resp.Items
+	if len(rows) == 0 {
+		rows = resp.Tools
+	}
+	if len(rows) == 0 {
+		if status == "" {
+			fmt.Println("Nothing awaiting review — no pending or drifted tool definitions.")
+		} else {
+			fmt.Printf("No tool definitions with status %q.\n", status)
+		}
+		return
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "STATUS\tSERVER\tTOOL\tID")
+	for _, t := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			str(t["status"]), str(t["server_name"]), str(t["tool_name"]), str(t["id"]))
+	}
+	tw.Flush()
+
+	// ⚠ Say what the operator should DO. A list of drifted tools with no next
+	// step is a list somebody looks at twice and then stops looking at.
+	fmt.Println()
+	fmt.Println("  approve <id>     accept the observed definition as the new baseline")
+	fmt.Println("  reject <id>      refuse it")
+	fmt.Println("  quarantine <id>  block the tool outright")
+
+	exitOnDrift(body, failOnDrift, failOnPending)
+}
+
+// exitOnDrift is the CI gate.
+//
+// ⚠ DRIFTED ONLY BY DEFAULT. `pending` fires whenever anyone deploys a server
+// carrying a tool nobody has approved yet — which is routine. A gate that fails
+// on routine events gets disabled, and then it catches nothing. Failing on
+// `drifted` alone keeps the signal worth acting on.
+func exitOnDrift(body []byte, failOnDrift, failOnPending bool) {
+	if !failOnDrift && !failOnPending {
+		return
+	}
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+		Tools []map[string]interface{} `json:"tools"`
+	}
+	if json.Unmarshal(body, &resp) != nil {
+		return
+	}
+	rows := resp.Items
+	if len(rows) == 0 {
+		rows = resp.Tools
+	}
+	drifted, pending := 0, 0
+	for _, t := range rows {
+		switch str(t["status"]) {
+		case "drifted":
+			drifted++
+		case "pending":
+			pending++
+		}
+	}
+	fail := (failOnDrift && drifted > 0) || (failOnPending && pending > 0)
+	if !fail {
+		return
+	}
+	fmt.Fprintln(os.Stderr)
+	if drifted > 0 && failOnDrift {
+		fmt.Fprintf(os.Stderr, "FAIL: %d approved tool definition(s) have DRIFTED.\n", drifted)
+		fmt.Fprintln(os.Stderr, "  A tool you vetted is no longer what you vetted.")
+	}
+	if pending > 0 && failOnPending {
+		fmt.Fprintf(os.Stderr, "FAIL: %d tool definition(s) are PENDING review.\n", pending)
+	}
+	os.Exit(2)
+}
+
+func cmdInventoryProbe(gf globalFlags, target string) {
+	parts := strings.SplitN(target, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		fmt.Fprintln(os.Stderr, "Error: expected <namespace>/<server>, e.g. mcp-prod/exa-search")
+		os.Exit(1)
+	}
+	// ⚠ Probing is a WRITE in effect — it reaches out to the upstream server and
+	// records what it finds, which can flip a tool to `drifted`.
+	body, err := apiPost(gf, "/drift/servers/"+parts[0]+"/"+parts[1]+"/probe-now", map[string]interface{}{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	if gf.jsonOut {
+		var raw interface{}
+		_ = json.Unmarshal(body, &raw)
+		emitJSON(raw)
+		return
+	}
+	fmt.Printf("Probe requested for %s.\n", target)
+	fmt.Println("  Results land asynchronously — re-run `mcpctl inventory list` to see them.")
+}
+
+func cmdInventoryAction(gf globalFlags, args []string, action, past string) {
+	if len(args) < 1 {
+		fmt.Printf("Usage: mcpctl inventory %s <tool-id>\n", action)
+		fmt.Println("  Find ids with: mcpctl inventory list")
+		os.Exit(1)
+	}
+	id := args[0]
+	if _, err := apiPost(gf, "/inventory/tools/"+id+"/"+action, map[string]interface{}{}); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Tool %s %s.\n", id, past)
+	if action == "quarantine" {
+		// ⚠ Quarantine is estate-wide and immediate. Say so — it is the one
+		// action here that changes live traffic.
+		fmt.Println("  Every caller reaching this tool is now refused, in every namespace.")
+	}
 }
