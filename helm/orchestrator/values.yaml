@@ -259,6 +259,15 @@ orchestrator:
     ratingIntervalSeconds: 600    # rate every 10 min   (must be > 0)
     ratingSettleSeconds: 60       # only rate events >60s old   (>= 0)
 
+    # Delegated-token refresh sweeper. Leader-only.
+    #
+    # ⚠ Measured vendor lifetimes differ by 24x — Wix issues 4h on consent then
+    # 1h on every refresh; WayStation issues 24h throughout. The sweeper reads
+    # each grant's OBSERVED lifetime from the database rather than assuming, so
+    # the fraction below is proportionate to whatever a vendor actually does.
+    tokenRefreshIntervalSeconds: 600   # how often to look   (must be > 0)
+    tokenRefreshAtFraction: 0.5        # refresh at 50% life remaining (0 < f < 1)
+
     # ── Leader election (v1.7 multi-replica HA) ──────────────────────────
     # Override the auto-derived setting. By default, the chart enables
     # leader election when orchestrator.replicaCount > 1 and disables it

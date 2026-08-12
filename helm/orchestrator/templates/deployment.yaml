@@ -101,6 +101,22 @@ spec:
               value: {{ .Values.orchestrator.env.ratingIntervalSeconds | quote }}
             - name: MCP_RATING_SETTLE_SECONDS
               value: {{ .Values.orchestrator.env.ratingSettleSeconds | quote }}
+            # ── Delegated-token refresh sweeper ───────────────────────────
+            # ⚠ Keeps delegated OAuth grants alive. Without it an IDLE grant
+            # drifts past the window where the authorisation server still
+            # honours its refresh token, and only a browser re-consent
+            # recovers it — the USER for a user_email grant, an operator for
+            # a service account.
+            #
+            # ⚠ The FRACTION is the sensitive knob, not the interval. Wix
+            # rotates the refresh_token on every use, so refreshing more
+            # eagerly means more rotations and more chances to break the
+            # chain. Raise it only if a vendor expires grants faster than
+            # half their observed lifetime.
+            - name: MCP_TOKEN_REFRESH_INTERVAL_SECONDS
+              value: {{ .Values.orchestrator.env.tokenRefreshIntervalSeconds | quote }}
+            - name: MCP_TOKEN_REFRESH_AT_FRACTION
+              value: {{ .Values.orchestrator.env.tokenRefreshAtFraction | quote }}
             # ── Deploy-time image scanner endpoint ─────────────────────────
             # Resolves to: (1) scanning.scannerUrlOverride (bring-your-own
             # scanner), else (2) the bundled scanner-adapter service (if
