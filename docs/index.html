@@ -52,7 +52,7 @@
     {
       "@type": "Offer",
       "name": "Open Source",
-      "description": "Free forever, Apache 2.0. Up to 20 MCP servers, live metrics, and LLM calls by name.",
+      "description": "Free forever. Up to 20 MCP servers, live metrics, and LLM calls by name. CLI and portal require Pro.",
       "price": "0",
       "priceCurrency": "USD",
       "category": "Free"
@@ -1278,7 +1278,10 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
     <div style="text-align: center; margin-top: 24px; font-size: 13px; color: var(--text-secondary);">
       Apache 2.0 licensed. Source at
       <a href="https://github.com/magertron/orchestrator/tree/main/mcpctl" target="_blank" style="color: var(--accent-text);">magertron/orchestrator/mcpctl</a>.
-      Free for all customers. Commands that hit Pro or Enterprise features will return a clear license error unless your orchestrator is licensed for them.
+      Free to download; connecting it to an orchestrator requires a Pro or Enterprise
+      license — <code>mcpctl login</code> is refused on the Free tier, and commands that
+      reach higher-tier features return a clear license error naming the
+      tier they need.
     </div>
   </div>
 </section>
@@ -1304,7 +1307,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
           <li>Live metrics charts</li>
           <li>Envoy gateway with xDS</li>
           <li>Helm chart deployment</li>
-          <li>CLI tool (mcpctl) — Apache 2.0</li>
+          <li class="disabled">CLI tool (mcpctl)</li>
           <li>Basic RBAC (admin + viewer)</li>
           <li>Call LLM models by name through the gateway</li>
           <li>Community support via GitHub</li>
@@ -1335,6 +1338,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
           <li>SCIM 2.0 user provisioning</li>
           <li>Governance policy engine</li>
           <li>Multi-tenant namespace isolation</li>
+          <li>CLI tool (mcpctl) — scripting, CI, and automation</li>
           <li>Deployment history &amp; rollback</li>
           <li>Webhook notifications (Slack, email)</li>
           <li>Audit trail</li>
