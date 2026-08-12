@@ -2866,8 +2866,9 @@ func cmdCostReport(gf globalFlags, args []string) {
 	// ⚠ Echo the bounds the SERVER used, not the ones asked for. It defaults
 	// when they are omitted, and a statement whose period is implicit is a
 	// statement somebody will misread.
-	if f, ok := resp["from"]; ok {
-		fmt.Printf("Period: %v to %v (exclusive)\n\n", f, resp["to"])
+	// ⚠ period is a nested object, not two top-level keys.
+	if pd, ok := resp["period"].(map[string]interface{}); ok {
+		fmt.Printf("Period: %v to %v (exclusive)\n\n", pd["from"], pd["to"])
 	}
 	rows, _ := resp["rows"].([]interface{})
 	if len(rows) == 0 {
@@ -2881,20 +2882,33 @@ func cmdCostReport(gf globalFlags, args []string) {
 		m, ok := r.(map[string]interface{})
 		if !ok { continue }
 		if !printed {
-			fmt.Fprintln(tw, "SUBJECT\tAMOUNT (USD)")
+			fmt.Fprintln(tw, "SUBJECT\tSERVER\tCOST CENTRE\tCOST (USD)")
 			printed = true
 		}
-		label := str(m["department"])
-		for _, k := range []string{"user", "service_account", "vendor", "server_name", "name"} {
+		label := str(m["dept_name"])
+		for _, k := range []string{"caller_display", "server_name", "namespace"} {
 			if label == "" { label = str(m[k]) }
 		}
 		if label == "" { label = "(unattributed)" }
-		fmt.Fprintf(tw, "%s\t%v\n", label, m["amount_usd"])
+		// ⚠ cost_usd, not amount_usd. And cost_center is worth showing — it is
+		// the code a finance system actually keys on.
+		// ⚠ The department view returns one row PER SERVER per department, so
+		// a name repeats legitimately. Without the server column it reads as
+		// duplicate rows rather than a breakdown.
+		srv := str(m["server_name"])
+		if srv == "" { srv = "—" }
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%v\n", label, srv, str(m["cost_center"]), m["cost_usd"])
 	}
 	tw.Flush()
-	if total, ok := resp["total_usd"]; ok {
-		fmt.Printf("\nTotal: %v USD\n", total)
+	// ⚠ The API returns no total — sum the rows rather than leaving the reader
+	// to add up a chargeback statement by hand.
+	var total float64
+	for _, r := range rows {
+		if m, ok := r.(map[string]interface{}); ok {
+			if v, ok := m["cost_usd"].(float64); ok { total += v }
+		}
 	}
+	fmt.Printf("\nTotal: %.2f USD\n", total)
 }
 
 // nextMonth turns YYYY-MM-01 into the following YYYY-MM-01, for the half-open
@@ -2955,23 +2969,28 @@ func cmdDepartmentsList(gf globalFlags) {
 		emitJSON(raw)
 		return
 	}
+	// ⚠ The key is "departments", not "items" — the guess would have printed
+	// "No departments defined" while five existed.
 	var resp struct {
-		Items []map[string]interface{} `json:"items"`
+		Departments []map[string]interface{} `json:"departments"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		fmt.Println(string(body))
 		return
 	}
-	if len(resp.Items) == 0 {
+	if len(resp.Departments) == 0 {
 		fmt.Println("No departments defined.")
 		fmt.Println("  Every cost in a chargeback report will show as (unattributed) until")
 		fmt.Println("  departments exist and callers are assigned to them.")
 		return
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tID\tCOST CENTRE")
-	for _, d := range resp.Items {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", str(d["name"]), str(d["id"]), str(d["cost_center"]))
+	fmt.Fprintln(tw, "NAME\tNAMESPACE\tCOST CENTRE\tMEMBERS")
+	for _, d := range resp.Departments {
+		cc := str(d["cost_center"])
+		if cc == "" { cc = "—" }
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%v\n",
+			str(d["name"]), str(d["namespace"]), cc, d["member_count"])
 	}
 	tw.Flush()
 }
@@ -3069,7 +3088,7 @@ func cmdLoginToken(gf globalFlags, server, token string) {
 	gfProbe := gf
 	gfProbe.cfgOverride = &probe
 
-	body, err := apiGet(gfProbe, "/auth/me")
+	body, err := apiGet(gfProbe, "/servers")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Token rejected: %v\n\n", err)
 		fmt.Fprintln(os.Stderr, "  Nothing has been saved. Check that:")
