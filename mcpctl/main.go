@@ -171,7 +171,23 @@ func buildHTTPClient(cfg Config, gf globalFlags) (*http.Client, error) {
 // Callers decode into the appropriate Go type — the previous version
 // returned map[string]interface{} which couldn't represent top-level
 // arrays (e.g. /api/v1/servers returns a JSON array directly).
+// apiRequest issues one request and retries a leader-bounce 503. See
+// isNotLeader — mutating ops are leader-only and the Service load-balances, so
+// a follower rejects roughly half of them on a multi-replica install.
 func apiRequest(gf globalFlags, method, path string, body interface{}) ([]byte, int, error) {
+	respBody, status, err := apiRequestOnce(gf, method, path, body)
+	if err != nil {
+		return respBody, status, err
+	}
+	if isNotLeader(status, respBody) {
+		return apiRequestRetryLeader(gf, method, path, body, nil)
+	}
+	return respBody, status, nil
+}
+
+// apiRequestOnce is the raw request path with NO retry — the retry helper calls
+// this, not apiRequest, or it would recurse.
+func apiRequestOnce(gf globalFlags, method, path string, body interface{}) ([]byte, int, error) {
 	cfg := loadConfig()
 	// ⚠ A candidate credential under test — see globalFlags.cfgOverride.
 	if gf.cfgOverride != nil {
@@ -215,7 +231,74 @@ func apiRequest(gf globalFlags, method, path string, body interface{}) ([]byte, 
 		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
 	}
 
+	// ⚠ LEADER BOUNCE. Mutating operations are leader-only, and the Service
+	// load-balances across replicas — so on a multi-replica install a delete,
+	// approve or update lands on a follower about half the time and is
+	// rejected with 503 "not the current leader; retry the request".
+	//
+	// The server sets Retry-After and logs "client should retry". Until now
+	// nothing did: an operator saw a raw 503 about pod leadership and clicked
+	// again, which usually worked — which is why this was never reported.
+	//
+	// Retried HERE rather than in each of apiGet/apiPost/apiDelete/apiPut,
+	// because all four funnel through this function and a fifth helper would
+	// otherwise miss it.
 	return respBody, resp.StatusCode, nil
+}
+
+// isNotLeader reports whether a response is the orchestrator's leader-bounce
+// rejection. Matches on the marker rather than the exact sentence so a reworded
+// message does not silently stop retrying.
+func isNotLeader(status int, body []byte) bool {
+	if status != http.StatusServiceUnavailable {
+		return false
+	}
+	t := strings.ToLower(string(body))
+	return strings.Contains(t, "not the current leader") ||
+		strings.Contains(t, "not leader") ||
+		strings.Contains(t, "not_leader")
+}
+
+// apiRequestRetryLeader re-issues a request that hit a follower.
+//
+// ⚠ Honours Retry-After from the response rather than inventing a backoff —
+// the server already states the delay it wants.
+//
+// ⚠ Bounded. With N replicas the load balancer needs a few attempts to land on
+// the leader, but an unbounded loop would hang the CLI during a genuine outage
+// (e.g. mid-handover, when NO pod holds the lease). After the last attempt the
+// 503 is returned as-is so the operator sees the real message.
+func apiRequestRetryLeader(gf globalFlags, method, path string, body interface{},
+	first *http.Response) ([]byte, int, error) {
+
+	const maxAttempts = 5
+
+	delay := time.Second
+	if first != nil {
+		if ra := first.Header.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 && secs <= 30 {
+				delay = time.Duration(secs) * time.Second
+			}
+		}
+	}
+
+	var lastBody []byte
+	var lastStatus int
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		time.Sleep(delay)
+
+		respBody, status, err := apiRequestOnce(gf, method, path, body)
+		if err != nil {
+			return nil, status, err
+		}
+		if !isNotLeader(status, respBody) {
+			return respBody, status, nil
+		}
+		lastBody, lastStatus = respBody, status
+	}
+	// ⚠ Out of attempts. Return the server's own message — an invented error
+	// here would hide which operation was refused and why.
+	return lastBody, lastStatus, nil
 }
 
 // extractErrorMessage tries to pull a meaningful error message out of an
