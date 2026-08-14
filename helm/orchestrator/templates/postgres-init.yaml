@@ -1365,6 +1365,23 @@ data:
         WHERE source_id IS NOT NULL AND external_id IS NOT NULL;
 
     -- "What went missing" is the question after every sync.
+    -- ⚠ MOVED UP 2026-08-14. This ALTER lived ~150 lines below, AFTER three
+    -- indexes that reference the column it adds. On an EXISTING database that
+    -- is harmless: a previous run already added the column. On a FRESH one the
+    -- first such index fails with 'column "namespace" does not exist', and
+    -- because the schema bootstrap stops at the first failure, EVERYTHING
+    -- BELOW NEVER RAN — departments, user_departments, meter_events,
+    -- cost_contracts, rate_schedules, rate_tiers, rated_costs, cost_budgets,
+    -- credit_purchases, platform_config, and the system:finance-user role.
+    --
+    -- Ten tables and a role, silently absent on EVERY fresh install. Invisible
+    -- on Free (the cost plane is tier-gated, so the customer sees an upgrade
+    -- prompt, not an error) and it surfaces the moment they pay for Pro and
+    -- open Reports. Found on a clean QA box 2026-08-14; every existing cluster
+    -- already had the column and could never reproduce it.
+    ALTER TABLE uc_securable
+        ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT 'default';
+
     CREATE INDEX IF NOT EXISTS uc_securable_absent_idx
         ON uc_securable (namespace) WHERE state = 'absent';
 
@@ -1516,8 +1533,6 @@ data:
     -- resolution answers "may this principal do this verb here"; confinement
     -- answers "is this node visible to this tenant at all". Evaluated
     -- independently, both must pass. (uc_securable.cpp: GATE 1 / GATE 2.)
-    ALTER TABLE uc_securable
-        ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT 'default';
 
     -- Catalog names are unique PER NAMESPACE, not globally. The index created
     -- above makes them global, which collides the first time two tenants each

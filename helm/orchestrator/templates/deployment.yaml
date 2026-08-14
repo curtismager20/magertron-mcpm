@@ -171,7 +171,7 @@ spec:
             # operators manage schema themselves.
             {{- if .Values.postgresql.enabled }}
             - name: MCP_SCHEMA_FILE
-              value: "/etc/mcp-schema/01-schema.sql"
+              value: "/etc/mcp-schema"   # ⚠ the DIRECTORY — all three .sql keys
             {{- end }}
             # ── Leader election (v1.7+ multi-replica HA) ───────────────────
             # Auto-enabled when replicaCount > 1. The LeaderLock acquires
@@ -640,9 +640,11 @@ spec:
         - name: schema
           configMap:
             name: {{ include "mcp.fullname" . }}-postgres-init
-            items:
-              - key: 01-schema.sql
-                path: 01-schema.sql
+            # ⚠ NO items: filter — the ConfigMap has THREE keys (01-schema.sql,
+            # 02-cost-metering.sql, 03-seed.sql). Filtering to the first meant
+            # SchemaGuard applied a THIRD of the schema and reported success:
+            # 27 tables instead of 43 on a box where Postgres skipped its own
+            # init. Postgres's init dir mounts all three; this must match it.
         {{- end }}
         - name: tls
           secret:
