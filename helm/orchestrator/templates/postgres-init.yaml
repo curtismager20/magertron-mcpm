@@ -2052,6 +2052,33 @@ data:
      '["*"]', TRUE)
     ON CONFLICT (id) DO NOTHING;
 
+    -- ⚠ ADDED 2026-08-14. Both are declared in rbac_engine.cpp as built-in
+    -- roles (is_system_role = true) but were never seeded here, so a FRESH
+    -- install had 8 of the 10 system roles. Peppy has all ten only because
+    -- someone inserted these two by hand months ago — no customer would have.
+    --
+    -- system:mcp-consumer is the load-bearing one: it is what a developer
+    -- needs to use the portal and call tools. Without a row the admin cannot
+    -- see or assign it in the UI, which reads this table — so the primary
+    -- Free-tier workflow has no reachable path. system:auditor is
+    -- completeness, and SOC 2 relevant.
+    --
+    -- ⚠ PERMISSIONS MUST MATCH rbac_engine.cpp. MCPConsumer grants
+    -- MCPServer:* -> Read; Auditor grants AuditLog:* -> AuditRead. A row that
+    -- disagrees with the engine is worse than an absent one, because the
+    -- resolver and the UI would then describe different access.
+    INSERT INTO roles (id, name, description, permissions, allowed_namespaces, system_role) VALUES
+    ('system:mcp-consumer', 'MCP consumer', 'Invoke MCP tools via the gateway; no administrative access',
+     '["Read"]',
+     '["*"]', TRUE)
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO roles (id, name, description, permissions, allowed_namespaces, system_role) VALUES
+    ('system:auditor', 'Auditor', 'Read access to audit logs only',
+     '["AuditRead"]',
+     '["*"]', TRUE)
+    ON CONFLICT (id) DO NOTHING;
+
     -- Admin gains the billing actions so the superuser passes billing guards too.
     -- Idempotent: only rewrites if the billing actions are not already present.
     UPDATE roles
@@ -2059,12 +2086,27 @@ data:
      WHERE id = 'system:platform-admin'
        AND NOT (permissions @> '["BillingRead"]');
 
+    -- ⚠ SEEDED DISABLED 2026-08-14. These are TEMPLATES (is_template=TRUE) —
+    -- starting points an operator adopts, not rules that should enforce on
+    -- arrival. Shipped enabled, enterprise-standard blocks the very first
+    -- deploy from the catalog: it requires labels.team, the deploy wizard does
+    -- not ask for one, and Governance is a paid tab so a Free user cannot see
+    -- or edit the policy that is refusing them. A dead end at the primary Free
+    -- workflow, found on a clean QA box.
+    --
+    -- Compare the vulnerability policy below, which ships ENABLED and is
+    -- deliberately severity=WARNING so a first run still deploys. That is the
+    -- right shape for a default; these two were not following it.
+    --
+    -- An operator enables them once they have decided their labelling and
+    -- resource conventions. ON CONFLICT DO NOTHING means an existing install
+    -- that already enabled them is untouched.
     -- ── Governance policy templates ────────────────────────────────────────────
     INSERT INTO governance_policies (name, description, is_template, enabled, applies_to_namespaces, rules)
     VALUES (
         'enterprise-standard',
         'Default enterprise governance policy — enforces security, resource limits, naming, and transport standards.',
-        TRUE, TRUE, '["mcp-prod","mcp-staging"]',
+        TRUE, FALSE, '["mcp-prod","mcp-staging"]',
         '[
           {"category":"security","field":"transport","operator":"in","value":["streamable_http","sse"],"severity":"error","message":"Only Streamable HTTP or SSE transport allowed — stdio is not permitted in production"},
           {"category":"resource_limits","field":"memory_limit_mb","operator":"lte","value":2048,"severity":"error","message":"Memory limit must not exceed 2Gi"},
@@ -2081,7 +2123,7 @@ data:
     VALUES (
         'dev-relaxed',
         'Relaxed policy for development environments — minimal restrictions.',
-        TRUE, TRUE, '["mcp-dev"]',
+        TRUE, FALSE, '["mcp-dev"]',
         '[
           {"category":"resource_limits","field":"memory_limit_mb","operator":"lte","value":4096,"severity":"error","message":"Memory limit must not exceed 4Gi even in dev"},
           {"category":"resource_limits","field":"replicas","operator":"lte","value":5,"severity":"warning","message":"Consider keeping dev replicas under 5"},
