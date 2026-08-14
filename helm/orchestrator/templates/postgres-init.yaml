@@ -1726,11 +1726,37 @@ data:
     -- deliberate, separate data step. Guarded so it only backfills once (won't
     -- clobber an explicitly-set flag on re-run: only touches rows still at the
     -- default FALSE that have a positive minimum).
-    UPDATE cost_contracts
-        SET bill_commitment_true_up = TRUE
-        WHERE minimum_amount_usd IS NOT NULL
-          AND minimum_amount_usd > 0
-          AND bill_commitment_true_up = FALSE;
+    -- ⚠ GUARDED 2026-08-14. The comment above claims this "only backfills
+    -- once", reasoning that it touches only rows still at the default FALSE.
+    -- That reasoning does not hold: a DELIBERATE false and a DEFAULT false are
+    -- indistinguishable. SchemaGuard re-applies this file on EVERY orchestrator
+    -- startup, so every prepaid contract was being flipped back to committed —
+    -- reinstating the exact phantom-fee behaviour the flag was added to end.
+    --
+    -- Caught by rate-engine-suite S8, which creates a contract with
+    -- minimum=1000 and the flag FALSE, then finds it TRUE moments later and a
+    -- $500 true-up written. Not a test bug: set a customer's contract to
+    -- prepaid and the next restart bills them a commitment true-up.
+    --
+    -- Now runs ONLY when contract_type is absent — i.e. on a database that
+    -- predates the explicit-model column, which is precisely the population the
+    -- backfill was written for. Once contract_type exists, the model is
+    -- RECORDED and inference must not override it.
+    DO $backfill$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'cost_contracts'
+              AND column_name = 'contract_type'
+        ) THEN
+            UPDATE cost_contracts
+                SET bill_commitment_true_up = TRUE
+                WHERE minimum_amount_usd IS NOT NULL
+                  AND minimum_amount_usd > 0
+                  AND bill_commitment_true_up = FALSE;
+        END IF;
+    END
+    $backfill$;
 
     -- ── Explicit contract type (payg | committed | prepaid) ─────────────────────
     -- The STORED commercial model. Prior to this, type was reconstructed from
