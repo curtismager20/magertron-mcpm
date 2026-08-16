@@ -184,6 +184,34 @@ section.content em { color: var(--text); font-style: italic; }
   font-size: 14px; color: var(--text-secondary); line-height: 1.6;
 }
 
+/* Collapsible wrapper for the comparison table */
+.cmp-toggle { margin: 0; }
+.cmp-toggle > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 24px; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  transition: border-color 0.2s, background 0.2s;
+}
+.cmp-toggle > summary::-webkit-details-marker { display: none; }
+.cmp-toggle > summary:hover { border-color: var(--border-accent); background: var(--bg-card-hover); }
+.cmp-toggle > summary:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.cmp-chevron {
+  flex-shrink: 0; color: var(--text-tertiary); font-size: 13px;
+  transition: transform 0.2s, color 0.2s;
+}
+.cmp-toggle[open] > summary .cmp-chevron { transform: rotate(90deg); color: var(--accent-text); }
+.cmp-label { font-family: var(--sans); font-weight: 600; font-size: 15px; color: var(--text); }
+.cmp-count {
+  margin-left: auto; flex-shrink: 0;
+  font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-tertiary);
+}
+.cmp-toggle .when-open { display: none; }
+.cmp-toggle[open] .when-open { display: inline; }
+.cmp-toggle[open] .when-closed { display: none; }
+.cmp-body { margin-top: 16px; }
+
 /* Pills inside table cells */
 .pill {
   display: inline-block; padding: 2px 8px; border-radius: 100px;
@@ -410,6 +438,13 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 <section class="comparison">
   <div class="container">
     <div class="section-eyebrow" style="text-align:center; margin-bottom: 32px;">Side by side</div>
+    <details class="cmp-toggle">
+      <summary>
+        <span class="cmp-chevron">&#9656;</span>
+        <span class="cmp-label"><span class="when-closed">Show the full comparison</span><span class="when-open">Hide the full comparison</span></span>
+        <span class="cmp-count">18 dimensions</span>
+      </summary>
+      <div class="cmp-body">
     <table>
       <thead>
         <tr>
@@ -511,6 +546,8 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         </tr>
       </tbody>
     </table>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -542,26 +579,6 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         </ul>
       </div>
     </div>
-  </div>
-</section>
-
-<section class="content">
-  <div class="container">
-    <div class="section-eyebrow">The honest take</div>
-    <h2>These are complementary products, not adversaries.</h2>
-    <p style="line-height: 1.6;">
-      The mature enterprise MCP posture twelve months from now will not be AI Orchestrator
-      <em>or</em> AgentCore. It will be AI Orchestrator <em>and</em> AgentCore, plus other
-      runtimes, plus discovery sources across endpoint inspection and egress proxies and source
-      repositories. AgentCore hosts the MCP servers that belong on AWS. AI Orchestrator runs the
-      ones that belong in your cluster. The federation layer above both does inventory, policy,
-      and governance across the entire estate.
-    </p>
-    <p style="line-height: 1.6;">
-      <em>"We use AgentCore"</em> is not an MCP governance strategy. <em>"We govern every MCP
-      server in our environment — including the ones on AWS, on-prem, and on employee laptops"</em>
-      is the beginning of one.
-    </p>
   </div>
 </section>
 
