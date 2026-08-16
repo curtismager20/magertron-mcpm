@@ -387,11 +387,7 @@ nav .container { display: flex; justify-content: space-between; align-items: cen
 .modal-submit:hover { background: #1d4ed8; }
 
 
-/* Top padding cut from 80 to 28. The Sources section above already closes with
-   72px of its own, and the two stacked read as a gap rather than a break. The
-   bottom stays at 80 — that one separates the box from the footer, where the
-   space is doing real work. */
-.cta { padding: 28px 0 80px; text-align: center; }
+.cta { padding: 80px 0; text-align: center; }
 .cta-box {
   padding: 72px 60px; border-radius: 20px;
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(99, 102, 241, 0.05));
@@ -504,6 +500,10 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
   box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(37,99,235,0.1);
 }
 .dr-frame img { width: 100%; height: auto; display: block; }
+.dr-caption {
+  text-align: center; font-family: var(--mono); font-size: 12px;
+  color: var(--text-tertiary); margin-top: 18px;
+}
 /* Availability strip — plain and factual. A connector either exists or it
    does not, and saying so is cheaper than an asterisk. */
 .dr-avail { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
@@ -527,29 +527,34 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 <section class="hero">
   <div class="container">
     <div class="hero-badge" style="border-color: var(--border-accent); background: var(--accent-glow); color: var(--accent-text);">
-      <span style="font-weight: 600; letter-spacing: 0.04em;">NEW:</span>
+      <span style="font-weight: 600; letter-spacing: 0.04em;">NEW</span>
       AI Data Reach
     </div>
-    <h1 style="font-size: clamp(32px, 4vw, 50px); margin-bottom: 16px;">Which tool, <em>which table</em>,<br>for whom and when?</h1>
-    <p style="font-size: 16px; max-width: 600px; margin-bottom: 30px;">Your agents call tools. Those tools touch data. AI Data Reach tracks the complete round trip — from the user and agent, to the tool and again for the data behind it.</p>
+    <h1 style="font-size: clamp(32px, 4vw, 50px); margin-bottom: 16px;">Which tool touched<br><em>which table</em>, for whom</h1>
+    <p style="font-size: 16px; max-width: 600px; margin-bottom: 30px;">Your agents call tools. Those tools touch data. AI Data Reach governs the second half — every call authorized once for the tool, and again for the data behind it.</p>
     <div class="hero-actions">
       <a href="#universe" class="btn-primary">See the Catalog Universe →</a>
+      <a href="#" class="btn-secondary" onclick="openDemoModal(event)">Schedule a Demo</a>
     </div>
   </div>
 </section>
 
 <!-- ══ The Catalog Universe ════════════════════════════════════════════════
-     Screenshot carries this section on its own now — no label, no heading, no
-     caption. Rename the export to screenshots/catalog-universe.png on push;
-     the og:image and twitter:image meta tags point at that same path. -->
+     Live screenshot. Rename the export to screenshots/catalog-universe.png on
+     push — the og:image and twitter:image meta tags point at that same path. -->
 <section id="universe" style="padding: 40px 0 80px;">
   <div class="container">
-    <p class="section-desc" style="text-align: center; max-width: 620px; margin: 0 auto 40px;">Nested data tables and schemas are applied grants. Arm a role and learn what role is possible — and what comes next.</p>
+    <div style="text-align:center; max-width: 620px; margin: 0 auto 40px;">
+      <div class="section-label">The Catalog Universe</div>
+      <h2 class="section-title" style="font-size: clamp(24px, 2.6vw, 32px);">Every object, and who reaches it</h2>
+      <p class="section-desc" style="margin: 0 auto;">Objects are drawn the way they actually nest, so a grant on a catalog visibly covers every schema and table inside it. Arm a role and each box says what that role can do there — and where the answer came from.</p>
+    </div>
 
     <div class="dr-frame">
       <img src="screenshots/catalog-universe.png"
-           alt="A Snowflake catalog with its schemas nested inside it. A role is armed, and each schema is annotated with the privilege it holds and whether that privilege was set there or inherited from the catalog above.">
+           alt="The Catalog Universe: a Snowflake catalog with its schemas nested inside it. A role is armed, and each schema is annotated with the privilege it holds and whether that privilege was set there or inherited from the catalog above.">
     </div>
+    <div class="dr-caption">Containment, inherited privilege, and the reason behind each one.</div>
   </div>
 </section>
 
