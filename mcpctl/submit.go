@@ -84,6 +84,13 @@ type observation struct {
 	SourcePath    string    `json:"source_path,omitempty"`
 	ObservedAt    time.Time `json:"observed_at"`
 	Server        obsServer `json:"server"`
+
+	// ⚠ THE ORIGINAL MANIFEST, scrubbed. The flattened Server fields above are
+	// enough to LIST a server; they are nowhere near enough to ONBOARD one.
+	// Carrying the manifest means the deploy wizard can be prefilled from what
+	// the developer actually wrote — and by the classifier that already
+	// exists, rather than a second one built against five columns.
+	Raw map[string]any `json:"raw,omitempty"`
 }
 
 type ingestRequest struct {
@@ -322,6 +329,57 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// scrubbed parses the manifest for transport to inventory, with anything that
+// could be a credential removed.
+//
+// ⚠ A MANIFEST CAN CARRY SECRETS. The MCP registry schema gives environment
+// variables an optional `default`, and nothing stops a developer putting a
+// real key there — in a file they are about to hand to a platform team, from a
+// CLI they were told was safe to run. The ingest contract already says env
+// KEYS only; this makes the raw passthrough honour the same rule rather than
+// quietly reintroducing what the flattened fields were careful to exclude.
+//
+// Conservative by construction: it strips `default` and `value` from anything
+// under an environmentVariables / environment_variables / runtimeArguments
+// list, and drops any top-level key that looks like a credential. A manifest
+// field this does not recognise survives — the alternative, an allowlist,
+// would silently discard whatever the spec adds next.
+func scrubbed(rawJSON []byte) map[string]any {
+	var m map[string]any
+	if err := json.Unmarshal(rawJSON, &m); err != nil {
+		return nil
+	}
+	scrubValue(m)
+	return m
+}
+
+var secretishKeys = map[string]bool{
+	"default": true, "value": true, "password": true, "secret": true,
+	"token": true, "apikey": true, "api_key": true, "credential": true,
+	"credentials": true, "authorization": true, "client_secret": true,
+	"clientsecret": true, "private_key": true, "privatekey": true,
+}
+
+func scrubValue(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, child := range t {
+			if secretishKeys[strings.ToLower(k)] {
+				// ⚠ Delete rather than blank. A key present with an empty
+				// value reads as "the developer set nothing", which is a
+				// different and misleading claim.
+				delete(t, k)
+				continue
+			}
+			scrubValue(child)
+		}
+	case []any:
+		for _, child := range t {
+			scrubValue(child)
+		}
+	}
+}
+
 // ─── ids ────────────────────────────────────────────────────────────────────
 
 // newObservationID returns a lexicographically-sortable id.
@@ -391,6 +449,7 @@ func runSubmit(gf globalFlags, o submitOpts) error {
 			ObservationID: newObservationID(),
 			SourceKind:    "ide_submission",
 			SourcePath:    filepath.Base(o.Path),
+			Raw:           scrubbed(raw),
 			ObservedAt:    time.Now().UTC(),
 			Server:        srv,
 		}},
@@ -410,6 +469,10 @@ func runSubmit(gf globalFlags, o submitOpts) error {
 	if srv.Package != nil {
 		fmt.Printf("  package     %s/%s %s\n",
 			srv.Package.Ecosystem, srv.Package.Name, srv.Package.VersionSpec)
+	}
+	if req.Observations[0].Raw != nil {
+		fmt.Printf("  manifest    carried through (%d top-level field(s), "+
+			"credential-ish values removed)\n", len(req.Observations[0].Raw))
 	}
 	if len(srv.EnvKeys) > 0 {
 		// Names only — worth showing so the developer can SEE that no values
