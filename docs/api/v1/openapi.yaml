@@ -1,0 +1,1395 @@
+openapi: 3.1.0
+
+# =============================================================================
+# Magertron Platform API — v1
+#
+# ⚠ SCOPE. The orchestrator registers ~101 routes under /api/v1. This document
+# describes the SUBSET that is intended for customer automation and whose
+# response shapes are asserted by the regression suite. An endpoint's absence
+# here does not mean it is unavailable — it means it is not yet a contract.
+#
+# ⚠ PROVENANCE. Every response schema here was taken from a LIVE response on
+# 2026-08-16, not from reading the handlers. That matters: a first draft built
+# from the request side got four things wrong — three endpoints wrap their
+# results in an envelope rather than returning a bare array, Role.permissions
+# is a structured object rather than a list of names, Budget carries live
+# consumption fields, and User reports two different timestamp formats.
+#
+# ⚠ Where the API is inconsistent, this document says so rather than tidying it
+# up. A spec that describes what you wish you had shipped is worse than none.
+#
+# NOT IN v1, deliberately:
+#   * Metering and cost EXPORT (/api/v1/billing/...). The endpoints exist; no
+#     test asserts their shape, so their contract cannot yet be promised.
+#   * Unity Catalog (/api/v1/uc/...). Substantial and well-tested, but newer —
+#     held for v2 rather than frozen early.
+#   * Governance policy CRUD. Configured in the UI; not an automation surface.
+# =============================================================================
+
+info:
+  title: Magertron Platform API
+  version: "1.0.0"
+  summary: Governed control plane for MCP servers, agents and their traffic.
+  description: |
+    Magertron sits between agents and the MCP servers, LLM providers and REST
+    APIs they call. This API is the automation surface for the control plane:
+    registering and approving servers, provisioning roles and users, setting
+    tool-level permissions, and capping spend.
+
+    ## Three failure modes every client must handle
+
+    **503 — not the current leader.** Mutating operations are leader-only, and
+    the service load-balances across replicas. On a multi-replica install a
+    write lands on a follower roughly half the time and is refused with a 503
+    carrying `Retry-After: 1`. **Retry it.** The load balancer will route the
+    retry elsewhere. This is not an error condition; it is the documented
+    protocol, and a client that does not retry will appear to fail
+    intermittently for no reason. Read operations are served by any replica and
+    do not have this behaviour.
+
+    **402 — tier capacity.** Server registration is capped per licence tier.
+    The response body carries the current count and the cap, so a client can
+    report the limit rather than the refusal.
+
+    **400 — validation.** Field-level, with the offending value named. See each
+    operation for its ranges.
+
+    ## Authentication
+
+    Two mechanisms, and automation wants the second.
+
+    **Password login** (`POST /auth/login`) is interactive. Administrator
+    accounts are on a two-phase MFA chain, so this returns `mfa_required` with
+    a pending ticket rather than a token — it cannot be scripted.
+
+    **Service-account tokens** are what automation uses: a signed JWT carrying
+    `scope_kind=service_account`, with no interactive MFA step. Create the
+    service account and its key in the admin UI, then present the token as
+    `Authorization: Bearer <jwt>`.
+
+    ⚠ The token's `sub` is the identity every grant is keyed on. Delegated
+    OAuth in particular matches on an exact `sub`, and a mismatch returns
+    `consent_required` — which reads as "nobody authorized this" rather than
+    "you authorized a different principal".
+
+    ## Namespaces
+
+    There is no namespace-creation endpoint, and none is needed. A namespace is
+    created implicitly when the first server is registered into it. `namespace`
+    is **required** on registration — it is not defaulted, so a script that
+    omits it gets a 400 rather than silently deploying to production.
+
+    ## What v1 commits to
+
+    These are the platform's core operations — registering a server, granting a
+    role, capping spend. They are the oldest and least volatile part of the
+    surface, and we do not expect them to change.
+
+    **Within v1:**
+
+    * An existing field will not be removed, renamed, or change type.
+    * New **optional** fields may be added to responses. Your client must
+      ignore fields it does not recognise — that is the only forward
+      compatibility this promise requires of you.
+    * New optional request fields may be added. Existing requests keep working.
+    * Status codes for a given outcome will not change.
+
+    **Breaking changes go to `/api/v2`.** When v2 ships, **v1 remains
+    supported for 12 months** from that date.
+
+    ⚠ **What is NOT covered.** The orchestrator registers roughly a hundred
+    routes under `/api/v1/`. This document describes eighteen of them. The rest
+    are reachable, and some are useful, but they carry no contract and may
+    change in any release without notice. In particular:
+
+    * `/api/v1/uc/...` — Unity Catalog. Substantial and well-tested, but newer;
+      held for v2 rather than frozen early.
+    * `/api/v1/billing/...` — metering and cost export. Commercially the most
+      interesting gap, and deliberately excluded: nothing currently asserts
+      those response shapes, so their contract cannot honestly be promised.
+    * Governance policy CRUD, drift, and the assistant endpoints.
+
+    If you need one of those, say so — the bar for adding an endpoint to v1 is
+    a test that pins its shape, not a decision that it seems stable.
+
+    ⚠ **Two things this document freezes, deliberately.** `Permission` exposes
+    the platform's internal enum ordinals: `resource_type` values and the
+    `actions` bitmask. Publishing them means those numbers can never be
+    reordered or reassigned. And three endpoints wrap their results in an
+    envelope while two return bare arrays — an inconsistency recorded here
+    rather than tidied, because changing it now would break the very clients
+    this document exists to enable.
+
+  contact:
+    name: Magertron
+    url: https://magertron.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://{host}:{port}/api/v1
+    description: Orchestrator API. UI, REST API and the MCP gateway share one port.
+    variables:
+      host:
+        default: app.magertron.com
+      port:
+        default: "30444"
+        description: |
+          NodePort installs default to 30444. `install.sh --node-port` overrides
+          it; `kubectl get svc -n mcp-system` confirms what is listening.
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Servers
+    description: |
+      Register, approve, inspect and remove MCP servers. The primary automation
+      surface — provisioning from CI lives here.
+  - name: RBAC
+    description: Roles, users, and tool-level permissions.
+  - name: Budgets
+    description: Per-server spend caps enforced at the gateway.
+  - name: Auth
+    description: Obtaining a token.
+  - name: Namespaces
+    description: Enumerating tenants.
+
+# =============================================================================
+paths:
+
+  # ─── Auth ───────────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Exchange username and password for a token
+      operationId: login
+      security: []
+      description: |
+        ⚠ Interactive only. Accounts on the two-phase MFA chain — which
+        includes administrators by policy — receive `mfa_required: true` and a
+        `pending` ticket instead of a token, and must complete the IdP leg.
+
+        **Automation should use a service-account token instead** and not call
+        this endpoint at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: |
+            Either a token, or an MFA challenge. The two are distinguished by
+            the presence of `mfa_required` — check it before reading `token`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/LoginToken"
+                  - $ref: "#/components/schemas/LoginMfaChallenge"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ─── Namespaces ─────────────────────────────────────────────────────────
+  /namespaces:
+    get:
+      tags: [Namespaces]
+      summary: List namespaces the caller may act in
+      operationId: listNamespaces
+      description: |
+        ⚠ Scoped to the caller. A namespace-confined principal sees only its
+        own; a platform administrator sees all. The list is therefore an
+        accurate statement of reach, not a global inventory.
+
+        There is no create/delete counterpart — see the Namespaces note in the
+        API description.
+      responses:
+        "200":
+          description: |
+            Namespace names, plus whether the caller is unconfined.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespaces:
+                    type: array
+                    items: { type: string }
+                  wildcard:
+                    type: boolean
+                    description: |
+                      True when the caller may act in ANY namespace, including
+                      ones not yet created. A confined principal gets `false`
+                      and only the namespaces it holds.
+              example:
+                namespaces: ["mcp-csis", "mcp-prod"]
+                wildcard: true
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ─── Servers ────────────────────────────────────────────────────────────
+  /servers:
+    get:
+      tags: [Servers]
+      summary: List servers
+      operationId: listServers
+      description: |
+        Returns every server the caller may see, across namespaces. Each entry
+        is either an `internal` or an `external` server and **the two carry
+        different fields** — see the `Server` schema.
+      responses:
+        "200":
+          description: Servers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+    post:
+      tags: [Servers]
+      summary: Register a server
+      operationId: createServer
+      description: |
+        Registers an internal (image-backed) or external (endpoint-backed)
+        server. The `type` field discriminates, and the required fields differ
+        accordingly.
+
+        ⚠ **The namespace is created if it does not exist.** This is the only
+        way to create one.
+
+        ⚠ **External servers are not routable until approved.** Registration
+        puts them in `Registered`; `POST /servers/{ns}/{name}/approve` moves
+        them to `Active` and builds the gateway route.
+
+        ⚠ **Leader-only.** See the 503 note in the API description.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/CreateInternalServer"
+                - $ref: "#/components/schemas/CreateExternalServer"
+              discriminator:
+                propertyName: type
+                mapping:
+                  internal: "#/components/schemas/CreateInternalServer"
+                  external: "#/components/schemas/CreateExternalServer"
+      responses:
+        "201":
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "200":
+          description: Registered (some builds return 200 rather than 201).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "400":
+          description: |
+            Validation failure. `mcp_port` must be 1–65535 and `replicas`
+            1–1000; both are checked before parsing, because an out-of-range
+            port would otherwise be silently truncated into a valid-looking one.
+            A missing `namespace` also lands here.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "402": { $ref: "#/components/responses/TierCapacity" }
+        "403":
+          description: |
+            Refused by governance policy. The body carries a `violations` array
+            naming each rule, its severity and the offending value — **read it
+            rather than the top-level message**, which says only that a policy
+            refused.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GovernanceRejection" }
+        "409":
+          description: |
+            A server already exists with that name in that namespace, or (for
+            external servers) at that endpoint URL in that namespace.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /servers/{namespace}/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    get:
+      tags: [Servers]
+      summary: Get one server
+      operationId: getServer
+      responses:
+        "200":
+          description: The server.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: |
+            Transiently unavailable — the orchestrator could not reach its
+            database. Retry.
+    delete:
+      tags: [Servers]
+      summary: Delete a server
+      operationId: deleteServer
+      description: |
+        Removes the server, its route, and — for DCR-provisioned external
+        servers — the credential Secret registration created.
+
+        ⚠ **Financial records survive.** `meter_events` and `cost_contracts`
+        rows for this server are retained deliberately: chargeback integrity
+        and SOC 2 evidence must outlive the resource they describe.
+
+        ⚠ **Leader-only.**
+      responses:
+        "200": { description: Deleted. }
+        "202": { description: Deletion accepted. }
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /servers/{namespace}/{name}/approve:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    post:
+      tags: [Servers]
+      summary: Approve an external server
+      operationId: approveServer
+      description: |
+        Moves an external server from `Registered` (or `Inactive`) to `Active`,
+        builds its gateway cluster and route, resolves any mTLS client
+        certificate from its Secret, and pushes the configuration.
+
+        ⚠ **Approving an already-Active server is a RECONCILE, not a no-op.**
+        A server can sit in `Active` with no route — re-approving rebuilds the
+        downstream state and returns `reconciled: true`. This is the correct
+        thing to try when traffic to an Active server 404s.
+
+        ⚠ Valid only for `server_type: external`. Internal servers become
+        routable through deployment, not approval.
+
+        ⚠ **Leader-only.**
+      responses:
+        "200":
+          description: Active.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: string, example: Active }
+                  reconciled:
+                    type: boolean
+                    description: True when the server was already Active and downstream state was rebuilt.
+        "400":
+          description: |
+            Not an external server, or not in a state approval accepts
+            (`Registered` or `Inactive`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /servers/{namespace}/{name}/disable:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    post:
+      tags: [Servers]
+      summary: Disable a server
+      operationId: disableServer
+      description: |
+        Withdraws the server's gateway route. Traffic stops; the registration,
+        its credentials and its history remain. Re-enable with `approve`.
+
+        ⚠ **Leader-only.**
+      responses:
+        "200": { description: Disabled. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /servers/{namespace}/{name}/tools:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    get:
+      tags: [Servers]
+      summary: List a server's discovered tools
+      operationId: listServerTools
+      description: |
+        Tools as discovered from the server itself, not as declared by an
+        operator. `input_schema` is the tool's own JSON Schema, passed through.
+      responses:
+        "200":
+          description: Tools.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Tool" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ─── RBAC: roles ────────────────────────────────────────────────────────
+  /roles:
+    get:
+      tags: [RBAC]
+      summary: List roles
+      operationId: listRoles
+      responses:
+        "200":
+          description: Roles, both built-in and custom.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Role" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [RBAC]
+      summary: Create a role
+      operationId: createRole
+      description: |
+        ⚠ Do not create a role whose `id` begins `system:`. Those identifiers
+        belong to built-in roles defined in the platform, and a database row
+        shadowing one leaves two definitions of the same role that can diverge.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRole" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: A role with that id already exists. }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /roles/{roleId}:
+    parameters:
+      - name: roleId
+        in: path
+        required: true
+        schema: { type: string }
+        example: custom:portal-user
+    delete:
+      tags: [RBAC]
+      summary: Delete a role
+      operationId: deleteRole
+      description: |
+        ⚠ Users holding the role lose it. Tool permissions granted to it
+        cascade away with it.
+      responses:
+        "200": { description: Deleted. }
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  # ─── RBAC: users ────────────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [RBAC]
+      summary: List users
+      operationId: listUsers
+      responses:
+        "200":
+          description: |
+            Users, wrapped in an `items` envelope. Password hashes are never
+            returned.
+
+            ⚠ Note the inconsistency: `/users` and `/budgets` and `/namespaces`
+            wrap their results; `/servers` and `/roles` return bare arrays.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [RBAC]
+      summary: Create a user
+      operationId: createUser
+      description: |
+        ⚠ **Set `email`.** It is the recovery path on an install with no
+        identity provider, the destination for alerts, and what an IdP-returned
+        identity is matched against if SSO is added later. A user created
+        without one becomes a second, unmatchable account at that point.
+
+        ⚠ A developer using the portal needs three roles together —
+        `system:mcp-consumer`, `system:llm-consumer` and `system:api-consumer`.
+        With only the first, their agent is refused the moment it reaches a
+        model, which reads as a broken platform rather than a missing grant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUser" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: That username already exists. }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /users/{username}:
+    parameters:
+      - name: username
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [RBAC]
+      summary: Delete a user
+      operationId: deleteUser
+      responses:
+        "200": { description: Deleted. }
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /users/{username}/roles:
+    parameters:
+      - name: username
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [RBAC]
+      summary: Replace a user's roles
+      operationId: setUserRoles
+      description: |
+        ⚠ **Replaces, does not add.** The array you send becomes the user's
+        complete role set; anything omitted is removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                roles:
+                  type: array
+                  items: { type: string }
+                  example: ["system:mcp-consumer", "system:llm-consumer", "system:api-consumer"]
+      responses:
+        "200": { description: Roles set. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  # ─── RBAC: tool permissions ─────────────────────────────────────────────
+  /tool-rbac/servers/{namespace}/{name}/permissions:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    post:
+      tags: [RBAC]
+      summary: Grant or deny a role access to a server's tools
+      operationId: createToolPermission
+      description: |
+        ⚠ **Each call ADDS a rule; it does not replace one.** Posting an ALLOW
+        to a role that already carries a DENY leaves both in place, and DENY
+        wins. To change a decision, delete the existing rule first.
+
+        ⚠ **Enforcement is not immediate.** ext_authz decides from a cache that
+        refreshes about once a minute, so a freshly written grant can take that
+        long to take effect. Automation that writes a grant and immediately
+        exercises it should poll rather than assume.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateToolPermission" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToolPermission" }
+        "200":
+          description: Created (some builds return 200).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToolPermission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /tool-rbac/servers/{namespace}/{name}/permissions/test:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    post:
+      tags: [RBAC]
+      summary: Dry-run an authorization decision
+      operationId: testToolPermission
+      description: |
+        Resolves what the policy engine WOULD decide, without making a call and
+        without writing anything. Useful for proving a grant before relying on
+        it, and for explaining a refusal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role_id: { type: string }
+                tool_name: { type: string }
+      responses:
+        "200":
+          description: The decision and the rule that produced it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed: { type: boolean }
+                  effect: { type: string, enum: [ALLOW, DENY] }
+                  matched_pattern: { type: string }
+                  reason: { type: string }
+
+  /tool-rbac/permissions/{permissionId}:
+    parameters:
+      - name: permissionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [RBAC]
+      summary: Delete a tool permission rule
+      operationId: deleteToolPermission
+      responses:
+        "200": { description: Deleted. }
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  # ─── Budgets ────────────────────────────────────────────────────────────
+  /budgets:
+    get:
+      tags: [Budgets]
+      summary: List budgets
+      operationId: listBudgets
+      responses:
+        "200":
+          description: Budgets, wrapped in a `budgets` envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  budgets:
+                    type: array
+                    items: { $ref: "#/components/schemas/Budget" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /budgets/{namespace}/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    get:
+      tags: [Budgets]
+      summary: Get a server's budget
+      operationId: getBudget
+      responses:
+        "200":
+          description: The budget, with current usage against it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Budget" }
+        "404": { description: No budget set for this server. }
+    put:
+      tags: [Budgets]
+      summary: Set or replace a server's budget
+      operationId: putBudget
+      description: |
+        A budget caps spend either as a percentage of the server's contractual
+        commitment or as an absolute dollar limit. When both are present the
+        stricter applies.
+
+        ⚠ **Enforcement lags the write by roughly 45 seconds** — the gateway
+        decides from a cached view. A client that sets a budget and immediately
+        expects a block should poll rather than assume.
+
+        ⚠ A percentage-anchored budget cannot be set below current usage: there
+        is no threshold that would refuse traffic already incurred. Use the
+        absolute limit for that case.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PutBudget" }
+      responses:
+        "200":
+          description: Set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Budget" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /budgets/{namespace}/{name}/override:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/ServerName"
+    post:
+      tags: [Budgets]
+      summary: Override a budget block
+      operationId: setBudgetOverride
+      description: |
+        Lifts enforcement without deleting the budget — the ceiling stays
+        recorded and visible, traffic resumes. The audit trail records who
+        overrode it and when.
+
+        ⚠ Subject to the same ~45s cache lag as setting a budget.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [override]
+              properties:
+                override: { type: boolean }
+      responses:
+        "200": { description: Override set. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+  /budgets/{budgetId}:
+    parameters:
+      - name: budgetId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Budgets]
+      summary: Delete a budget
+      operationId: deleteBudget
+      responses:
+        "200": { description: Deleted. }
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotLeader" }
+
+# =============================================================================
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A service-account JWT for automation, or a token from `/auth/login` for
+        interactive use. The token's `sub` is the identity every grant is keyed
+        on.
+
+  parameters:
+    Namespace:
+      name: namespace
+      in: path
+      required: true
+      schema: { type: string }
+      example: mcp-prod
+      description: |
+        The tenant the request is for. The caller must be permitted to act in
+        it; a namespace-confined principal addressing another namespace is
+        refused, not given an empty result.
+    ServerName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{2,62}$"
+      example: alpha-vantage
+
+  responses:
+    Unauthorized:
+      description: Missing, malformed or expired token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such resource in that namespace.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Validation failure; the body names the field and the value.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotLeader:
+      description: |
+        ⚠ **Not an error — retry it.** Mutating operations are leader-only and
+        this replica is not the leader. `Retry-After: 1` is set; the load
+        balancer routes the retry to a different pod.
+
+        A client that treats this as a failure will appear to break
+        intermittently on any multi-replica install. Every first-party client
+        retries it (`mcpctl` and the regression suite both do), and yours
+        should too — a handful of attempts with a short pause is sufficient.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds to wait before retrying. Honour it rather than inventing a backoff.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: this orchestrator pod is not the current leader; retry the request
+              hint:
+                type: string
+                example: the load balancer will route the retry to a different pod
+              operation:
+                type: string
+                example: deploy_server
+    TierCapacity:
+      description: |
+        The licence tier's server limit has been reached. The body carries the
+        current count and the cap so a client can report the ceiling rather
+        than the refusal.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              current: { type: integer }
+              cap: { type: integer }
+
+  schemas:
+
+    # ── VERIFIED against a live response, 2026-08-16 ────────────────────
+    Server:
+      description: |
+        ⚠ **Two shapes, one endpoint.** An `internal` server is image-backed
+        and carries deployment fields; an `external` server is endpoint-backed
+        and carries auth fields. `server_type` discriminates, and a client that
+        assumes one shape will find fields missing on the other.
+      oneOf:
+        - $ref: "#/components/schemas/InternalServer"
+        - $ref: "#/components/schemas/ExternalServer"
+      discriminator:
+        propertyName: server_type
+        mapping:
+          internal: "#/components/schemas/InternalServer"
+          external: "#/components/schemas/ExternalServer"
+
+    ServerCommon:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        namespace: { type: string }
+        server_type: { type: string, enum: [internal, external, hybrid] }
+        state:
+          type: string
+          description: |
+            `Running` is the serving state for internal servers; `Active` is
+            the serving state for external ones. `Registered` means an external
+            server awaits approval.
+          enum: [Pending, Registered, Deploying, Running, Active, Inactive, Failed, ProbeFailed]
+        deployed_by: { type: string }
+        routing_mode: { type: string, example: v3 }
+        group_name: { type: string }
+        clone_of:
+          type: string
+          description: ⚠ Empty string when not a clone, not null.
+          example: ""
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        annotations:
+          type: object
+          additionalProperties: { type: string }
+        env_vars:
+          type: object
+          additionalProperties: { type: string }
+        command:
+          type: array
+          items: { type: string }
+        args:
+          type: array
+          items: { type: string }
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/Tool" }
+        health: { $ref: "#/components/schemas/Health" }
+
+    InternalServer:
+      allOf:
+        - $ref: "#/components/schemas/ServerCommon"
+        - type: object
+          properties:
+            image: { type: string, example: curtismager20/mcp-docs }
+            image_tag: { type: string, example: v1 }
+            transport: { type: string, enum: [streamable_http, sse, stdio] }
+            upstream_path: { type: string, example: /mcp }
+            mcp_port: { type: integer }
+            cluster_port: { type: integer }
+            cluster_ip:
+              type: string
+              description: ⚠ The literal string `"None"` when unset, not null.
+              example: "None"
+            replicas: { type: integer }
+            min_replicas: { type: integer }
+            max_replicas: { type: integer }
+            cpu_request: { type: number }
+            cpu_limit: { type: number }
+            memory_request_mb: { type: integer }
+            memory_limit_mb: { type: integer }
+
+    ExternalServer:
+      allOf:
+        - $ref: "#/components/schemas/ServerCommon"
+        - type: object
+          properties:
+            endpoint_url: { type: string, format: uri }
+            auth_type:
+              type: string
+              enum: [none, bearer, api-key, oauth2-client-credentials, oauth2-authorization-code, mtls]
+            credential_secret_ref:
+              type: string
+              description: |
+                Kubernetes Secret holding the credential. For DCR servers the
+                platform creates `{name}-dcr-creds` itself.
+            credential_mode:
+              type: string
+              enum: [centralized, delegated]
+              description: |
+                `centralized` uses one operator-held credential for all callers.
+                `delegated` obtains a per-user token via OAuth, so the vendor
+                sees the end user rather than the platform.
+            tls_min_version: { type: string, example: tls1_2 }
+            upstream_http_version: { type: string, example: http1 }
+
+    Health:
+      type: object
+      properties:
+        liveness: { type: boolean }
+        readiness: { type: boolean }
+        ready_replicas: { type: integer }
+        total_replicas: { type: integer }
+        cpu_usage_pct: { type: number }
+        memory_usage_pct: { type: number }
+        requests_per_second: { type: integer }
+        error_count_1m: { type: integer }
+
+    Tool:
+      type: object
+      description: A tool as discovered from the server, not as declared.
+      properties:
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        read_only:
+          type: boolean
+          description: |
+            ⚠ Reported by the server. Governance can warn on mutating tools,
+            but the value is only as accurate as the server's own declaration.
+        idempotent: { type: boolean }
+        injection_flagged:
+          type: boolean
+          description: Set when the description was flagged as a possible prompt-injection vector.
+        injection_reason: { type: string }
+        input_schema:
+          type: object
+          description: The tool's own JSON Schema, passed through unmodified.
+          additionalProperties: true
+
+    # ── INFERRED — check against a live response before publishing ──────
+    Role:
+      type: object
+      properties:
+        id: { type: string, example: system:mcp-consumer }
+        name: { type: string }
+        description: { type: string }
+        permissions:
+          type: array
+          items: { $ref: "#/components/schemas/Permission" }
+        allowed_namespaces:
+          type: array
+          items: { type: string }
+          description: |
+            The tenants this role may act in. `["*"]` is unconfined.
+
+            ⚠ Separate from, and evaluated independently of, the namespace on
+            each permission. Confinement answers "is this tenant visible at
+            all"; the permission answers "may this verb be used here". Both
+            must pass.
+        is_admin_tier:
+          type: boolean
+          description: |
+            Whether the role counts toward the admin-tier ceiling. Compliance
+            controls bound how many such roles may exist.
+        system_role:
+          type: boolean
+          description: |
+            ⚠ Built-in, defined in the platform itself. Do not create a custom
+            role whose `id` shadows one — the resolver and this API would then
+            describe different access.
+
+    Permission:
+      type: object
+      description: |
+        One grant: a set of verbs, on a resource type, in a namespace.
+
+        ⚠ **Both `resource_type` and `actions` are numeric.** They are the
+        platform's internal enum values, exposed as-is. Decode them with the
+        tables below; do not guess from ordering.
+      properties:
+        resource_type:
+          type: integer
+          description: |
+            | Value | Resource |
+            |---|---|
+            | 0 | MCPServer |
+            | 1 | MCPGroup |
+            | 2 | GatewayRoute |
+            | 3 | AuditLog |
+            | 4 | Role |
+            | 5 | Policy |
+          enum: [0, 1, 2, 3, 4, 5]
+          example: 0
+        resource_name:
+          type: string
+          description: '`"*"` matches every resource of that type.'
+          example: "*"
+        namespace:
+          type: string
+          description: '`"*"` matches every namespace.'
+          example: mcp-csis
+        actions:
+          type: integer
+          format: uint32
+          description: |
+            ⚠ **A BITMASK, not a single value.** Combine with bitwise OR; test
+            with bitwise AND. `actions: 5` is `Read | Deploy`, not "action 5".
+
+            | Bit | Value | Action |
+            |---|---|---|
+            | 0 | 1 | Read |
+            | 1 | 2 | Write |
+            | 2 | 4 | Deploy |
+            | 3 | 8 | Undeploy |
+            | 4 | 16 | Scale |
+            | 5 | 32 | ViewLogs |
+            | 6 | 64 | ManageRoles |
+            | 7 | 128 | ManageGateway |
+            | 8 | 256 | AuditRead |
+            | 9 | 512 | BillingRead |
+            | 10 | 1024 | BillingWrite |
+
+            `0` is None; `4294967295` (0xFFFFFFFF) is All.
+          example: 1
+
+    CreateRole:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          example: custom:portal-user
+          description: ⚠ Do not use a `system:` prefix — those are reserved for built-ins.
+        name: { type: string }
+        description: { type: string }
+        permissions:
+          type: array
+          items: { $ref: "#/components/schemas/Permission" }
+        allowed_namespaces:
+          type: array
+          items: { type: string }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        email:
+          type: string
+          format: email
+          description: |
+            Contact address. ⚠ Distinct from `sso_email`: this is stable and
+            operator-set, that one is whatever the IdP returned.
+        sso_email:
+          type: string
+          format: email
+          description: Binds the account to an IdP-provided identity.
+        roles:
+          type: array
+          items: { type: string }
+        enabled: { type: boolean }
+        provisioned_via:
+          type: string
+          enum: [password, sso_jit, scim]
+          description: |
+            How the account came into being. SCIM-managed fields are read-only
+            in the admin UI.
+        created_at:
+          type: string
+          description: |
+            ⚠ **A unix epoch, as a STRING** — e.g. `"1780679568"`. Not ISO-8601,
+            and not a number. `last_used_at` on the same object IS ISO-8601;
+            the two are inconsistent and this document records that rather than
+            hiding it.
+          example: "1780679568"
+        last_used_at:
+          type: string
+          format: date-time
+          description: ISO-8601, unlike `created_at`.
+          example: "2026-08-14T12:27:33Z"
+
+    CreateUser:
+      type: object
+      required: [username, password, roles]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+        email:
+          type: string
+          format: email
+          description: ⚠ Set it. See the operation description.
+        roles:
+          type: array
+          items: { type: string }
+
+    CreateInternalServer:
+      type: object
+      required: [type, name, namespace, image]
+      properties:
+        type: { type: string, const: internal }
+        name:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,62}$"
+        namespace:
+          type: string
+          description: ⚠ Required. Created if it does not exist.
+        image: { type: string }
+        image_tag: { type: string, default: latest }
+        mcp_port: { type: integer, minimum: 1, maximum: 65535 }
+        upstream_path: { type: string, default: "/mcp" }
+        transport:
+          type: string
+          enum: [streamable_http, sse, stdio]
+          default: streamable_http
+          description: |
+            ⚠ `stdio` is refused by the default internal policy — it is not
+            permitted for a governed server.
+        replicas: { type: integer, minimum: 1, maximum: 1000, default: 1 }
+        cpu_limit: { type: number }
+        memory_limit_mb: { type: integer }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            ⚠ If the `enterprise-standard` governance policy is enabled, a
+            `team` label is required and registration without one is refused.
+        command:
+          type: array
+          items: { type: string }
+        args:
+          type: array
+          items: { type: string }
+        env_vars:
+          type: object
+          additionalProperties: { type: string }
+
+    CreateExternalServer:
+      type: object
+      required: [type, name, namespace, endpoint_url, auth_type]
+      properties:
+        type: { type: string, const: external }
+        name:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,62}$"
+        namespace:
+          type: string
+          description: ⚠ Required. Created if it does not exist.
+        endpoint_url: { type: string, format: uri }
+        auth_type:
+          type: string
+          enum: [none, bearer, api-key, oauth2-client-credentials, oauth2-authorization-code, mtls]
+        credential_secret_ref:
+          type: string
+          description: |
+            Required for every auth type except `none` and
+            `oauth2-authorization-code`. For the latter the platform performs
+            dynamic client registration and creates `{name}-dcr-creds` itself —
+            if the vendor advertises no protected-resource metadata, discovery
+            fails and registration returns 400.
+        credential_mode:
+          type: string
+          enum: [centralized, delegated]
+          default: centralized
+        labels:
+          type: object
+          additionalProperties: { type: string }
+
+    Budget:
+      type: object
+      description: |
+        A spend cap and its current consumption. The read side carries live
+        figures, so a client can report headroom rather than only the ceiling.
+      properties:
+        id: { type: string, format: uuid }
+        scope_type: { type: string, example: server }
+        server_id: { type: string, format: uuid }
+        threshold_pct:
+          type: [number, "null"]
+          description: |
+            Percentage of the contractual commitment at which traffic is
+            refused. Null when the budget is absolute-only.
+        limit_usd:
+          type: [number, "null"]
+          description: |
+            Absolute ceiling in USD. Applied alongside `threshold_pct`; when
+            both are set the stricter wins. Null when percentage-only.
+        budget_amount_usd:
+          type: [number, "null"]
+          description: The resolved ceiling in dollars, whichever rule produced it.
+        commitment_usd:
+          type: number
+          description: |
+            The server's contractual commitment, which `threshold_pct` is a
+            percentage OF. ⚠ Zero when no contract carries one — in which case
+            a percentage-anchored budget has nothing to anchor to and the
+            absolute limit is the only usable rule.
+        usage_usd:
+          type: number
+          description: Spend in the current billing period.
+        pct_consumed:
+          type: [number, "null"]
+          description: Usage as a percentage of the commitment. Null when there is no commitment.
+        over_budget:
+          type: boolean
+          description: |
+            Whether the cap is currently exceeded. ⚠ Reflects the rating
+            engine's view, which the gateway's enforcement cache trails by
+            roughly 45 seconds.
+        override:
+          type: boolean
+          description: When true the budget is recorded and visible but not enforced.
+        created_by: { type: string }
+
+    PutBudget:
+      type: object
+      properties:
+        threshold_pct: { type: number, minimum: 0, maximum: 100 }
+        limit_usd: { type: number, minimum: 0 }
+        override: { type: boolean, default: false }
+
+    CreateToolPermission:
+      type: object
+      required: [role_id, pattern_type, tool_pattern, effect]
+      properties:
+        role_id: { type: string }
+        pattern_type:
+          type: string
+          enum: [EXACT, WILDCARD, REGEX]
+        tool_pattern:
+          type: string
+          example: "*"
+        effect:
+          type: string
+          enum: [ALLOW, DENY]
+          description: ⚠ DENY wins over ALLOW when both match.
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        reason: { type: string }
+
+    ToolPermission:
+      allOf:
+        - $ref: "#/components/schemas/CreateToolPermission"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            server_id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+            created_by: { type: string }
+
+    LoginToken:
+      type: object
+      properties:
+        token: { type: string }
+        username: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+
+    LoginMfaChallenge:
+      type: object
+      description: |
+        The account is on the two-phase MFA chain. Complete the IdP leg with
+        the `pending` ticket. ⚠ Automation cannot proceed past this — use a
+        service-account token instead.
+      properties:
+        mfa_required: { type: boolean, const: true }
+        pending: { type: string }
+        username: { type: string }
+        providers:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+
+    GovernanceRejection:
+      type: object
+      description: |
+        ⚠ Read `violations`, not `error`. The top-level message says only that
+        a policy refused; the array says which rule, on which field, with what
+        value, and at what severity. Only `severity: error` entries block —
+        warnings are advisory and the deployment proceeds.
+      properties:
+        allowed: { type: boolean, const: false }
+        error: { type: string }
+        error_count: { type: integer }
+        warning_count: { type: integer }
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              policy_name: { type: string }
+              category: { type: string }
+              field: { type: string }
+              expected: { type: string }
+              actual_value: { type: string }
+              message: { type: string }
+              severity: { type: string, enum: [error, warning] }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        hint: { type: string }
