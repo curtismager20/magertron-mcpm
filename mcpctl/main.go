@@ -2608,6 +2608,10 @@ func main() {
 		cmdListServers(gf)
 	case "deploy":
 		cmdDeploy(gf, cmdArgs)
+	// ⚠ submit is NOT deploy. It records that a server EXISTS so the platform
+	// team can review it; it creates nothing routable. See submit.go.
+	case "submit":
+		cmdSubmit(gf, cmdArgs)
 	case "register-external", "register":
 		cmdRegisterExternal(gf, cmdArgs)
 	case "approve":

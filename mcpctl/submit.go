@@ -34,15 +34,14 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -54,12 +53,12 @@ import (
 // than no submission, because the developer believes they are covered.
 
 type obsAgent struct {
-	AgentID       string    `json:"agent_id"`
-	AgentVersion  string    `json:"agent_version"`
-	HostID        string    `json:"host_id"`
-	HostOS        string    `json:"host_os,omitempty"`
-	UserID        string    `json:"user_id,omitempty"`
-	CollectedAt   time.Time `json:"collected_at"`
+	AgentID      string    `json:"agent_id"`
+	AgentVersion string    `json:"agent_version"`
+	HostID       string    `json:"host_id"`
+	HostOS       string    `json:"host_os,omitempty"`
+	UserID       string    `json:"user_id,omitempty"`
+	CollectedAt  time.Time `json:"collected_at"`
 }
 
 type obsPackage struct {
@@ -69,13 +68,13 @@ type obsPackage struct {
 }
 
 type obsServer struct {
-	DeclaredName string      `json:"declared_name"`
-	Transport    string      `json:"transport"`
-	Command      string      `json:"command,omitempty"`
-	Args         []string    `json:"args,omitempty"`
-	EnvKeys      []string    `json:"env_keys,omitempty"`
-	EndpointURL  string      `json:"endpoint_url,omitempty"`
-	Package      *obsPackage `json:"package,omitempty"`
+	DeclaredName string         `json:"declared_name"`
+	Transport    string         `json:"transport"`
+	Command      string         `json:"command,omitempty"`
+	Args         []string       `json:"args,omitempty"`
+	EnvKeys      []string       `json:"env_keys,omitempty"`
+	EndpointURL  string         `json:"endpoint_url,omitempty"`
+	Package      *obsPackage    `json:"package,omitempty"`
 	Extra        map[string]any `json:"extra,omitempty"`
 }
 
@@ -340,15 +339,25 @@ func newObservationID() string {
 // ─── the command ────────────────────────────────────────────────────────────
 
 type submitOpts struct {
-	Path        string // .mcpb or server.json
-	InventoryURL string // base, e.g. https://host:30444
-	Token       string // JWT carrying inventory:write
-	AgentID     string // the submitting identity — defaults to the token's sub
-	UserID      string
-	DryRun      bool
+	Path    string // .mcpb or server.json
+	AgentID string // informational only — see below
+	UserID  string
+	DryRun  bool
 }
 
-func runSubmit(o submitOpts) error {
+// ⚠ NO TOKEN OR URL HERE. Both come from the stored config via apiRequest,
+// which also carries the TLS settings and — importantly — the leader-bounce
+// retry. A hand-rolled http.Client would have to reimplement all three, and
+// would get the retry wrong, which is the failure that looks like the platform
+// being flaky.
+//
+// ⚠ AgentID is INFORMATIONAL. The orchestrator OVERWRITES agent_id and user_id
+// from the authenticated principal before forwarding, so whatever is set here
+// does not decide attribution. It is sent anyway because a dry-run should show
+// the true shape of the payload, and because the field is required by the
+// ingest contract.
+
+func runSubmit(gf globalFlags, o submitOpts) error {
 	raw, err := readManifest(o.Path)
 	if err != nil {
 		return err
@@ -416,30 +425,20 @@ func runSubmit(o submitOpts) error {
 		return nil
 	}
 
-	url := strings.TrimRight(o.InventoryURL, "/") + "/inventory/v1/observations"
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	respBody, status, err := apiRequest(gf, "POST", "/inventory/observations", req)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not reach Magertron: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+o.Token)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("could not reach the inventory service: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-
-	switch resp.StatusCode {
-	case http.StatusAccepted, http.StatusOK:
+	switch status {
+	case 200, 202:
 		var ir ingestResponse
 		_ = json.Unmarshal(respBody, &ir)
 
 		// ⚠ PARTIAL SUCCESS IS THE MODEL. A 202 does not mean everything was
 		// taken — per-observation failures come back in rejected[] without
-		// failing the batch. Read it, or a developer will believe a rejected
-		// submission succeeded.
+		// failing the batch. Reading only the status would tell a developer
+		// their submission landed when it did not.
 		if len(ir.Rejected) > 0 {
 			for _, r := range ir.Rejected {
 				fmt.Printf("\nREJECTED: %s\n", r.Reason)
@@ -452,26 +451,92 @@ func runSubmit(o submitOpts) error {
 		fmt.Printf("⚠ This does NOT deploy it — they decide whether and when.\n")
 		return nil
 
-	case http.StatusUnauthorized:
-		return fmt.Errorf("unauthorized: the token is missing, expired, or lacks " +
-			"the inventory:write scope. Ask your administrator for a submission token")
+	case 401, 403:
+		return fmt.Errorf("not authorized to submit — run: mcpctl login")
 
-	case http.StatusForbidden:
-		return fmt.Errorf("forbidden: the token was valid but has been revoked, " +
-			"or does not carry inventory:write")
-
-	case http.StatusBadRequest:
-		return fmt.Errorf("the inventory service rejected the batch: %s",
-			strings.TrimSpace(string(respBody)))
+	case 500:
+		// The one 500 worth explaining rather than dumping.
+		if strings.Contains(strings.ToLower(string(respBody)), "not enabled") {
+			return fmt.Errorf("developer submissions are not enabled on this " +
+				"install — ask your administrator to check the orchestrator " +
+				"minted its inventory write credential at startup")
+		}
+		return fmt.Errorf("server error: %s", strings.TrimSpace(string(respBody)))
 
 	default:
-		return fmt.Errorf("unexpected %d from the inventory service: %s",
-			resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return fmt.Errorf("unexpected %d: %s", status,
+			strings.TrimSpace(string(respBody)))
 	}
 }
 
-// runtimeOS is split out so the import of "runtime" stays local to it — the
-// rest of this file is deliberately dependency-light.
-func runtimeOS() string {
-	return goRuntimeOS()
+func runtimeOS() string { return runtime.GOOS }
+
+// cmdSubmit — `mcpctl submit <file.mcpb|server.json> [--dry-run] [--user NAME]`
+//
+// ⚠ Manual flag walking, matching the rest of this CLI. flag.FlagSet stops at
+// the first non-flag argument, which would break `submit --dry-run file.json`
+// and `submit file.json --dry-run` behaving the same way.
+func cmdSubmit(gf globalFlags, args []string) {
+	var o submitOpts
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run", "-n":
+			o.DryRun = true
+		case "--user":
+			if i+1 < len(args) {
+				i++
+				o.UserID = args[i]
+			}
+		case "--help", "-h":
+			printSubmitHelp()
+			return
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				fmt.Fprintf(os.Stderr, "unknown flag: %s\n", args[i])
+				printSubmitHelp()
+				os.Exit(2)
+			}
+			o.Path = args[i]
+		}
+	}
+
+	if o.Path == "" {
+		printSubmitHelp()
+		os.Exit(2)
+	}
+	if _, err := os.Stat(o.Path); err != nil {
+		fmt.Fprintf(os.Stderr, "cannot read %s: %v\n", o.Path, err)
+		os.Exit(1)
+	}
+
+	if o.AgentID == "" {
+		// Informational only — the orchestrator overwrites it from the
+		// authenticated principal. Sent so a dry-run shows the real shape.
+		o.AgentID = "mcpctl"
+	}
+
+	if err := runSubmit(gf, o); err != nil {
+		fmt.Fprintf(os.Stderr, "\n%v\n", err)
+		os.Exit(1)
+	}
+}
+
+func printSubmitHelp() {
+	fmt.Print(`mcpctl submit <file> [flags]
+
+Hand a server you have built to the people who govern it.
+
+  <file>        a .mcpb bundle, or a server.json manifest
+
+  --dry-run,-n  show what would be sent, send nothing
+  --user NAME   record who submitted it
+
+⚠ SUBMITTING IS NOT DEPLOYING. This records that your server exists so your
+platform team can review it. It creates no route and deploys nothing — they
+decide whether and when it runs.
+
+Submitting the same server again is a revision: it updates the existing entry
+rather than creating a second one.
+`)
 }
