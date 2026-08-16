@@ -322,14 +322,24 @@ spec:
 
             - name: MCP_INVENTORY_URL
               value: "http://{{ include "mcp.fullname" . }}-inventory:8090"
-            # MCP_INVENTORY_ADMIN_TOKEN — long-lived JWT (10y TTL, scope
-            # inventory:admin) minted by the post-install hook into a
-            # Secret. `optional: true` lets the pod start on FIRST install
-            # before the hook has run; the orchestrator's
-            # InventoryAdminClient handles the empty-token case by
-            # returning a clear "not configured" error on mint attempts.
-            # After the hook completes, restart the orchestrator pod to
-            # pick up the token.
+           # MCP_INVENTORY_ADMIN_TOKEN — an OPERATOR OVERRIDE, not the
+           # normal path.
+           #
+           # ⚠ THERE IS NO POST-INSTALL HOOK. This comment used to say there
+           # was. The hook proved unreliable on multi-node clusters and was
+           # replaced by a self-mint in main.cpp section 10.5, which signs
+           # with MCP_JWT_PRIVATE_KEY — the same RS256 key mcp-inventory
+           # validates against — and ::setenv's the result at startup.
+           #
+           # ⚠ THE SELF-MINTED TOKEN IS INVISIBLE FROM OUTSIDE THE PROCESS.
+           # `kubectl exec -- printenv MCP_INVENTORY_ADMIN_TOKEN` returns
+           # nothing on a perfectly healthy install. That is expected, and
+           # mistaking it for a missing credential cost an hour on 2026-08-16
+           # — including building a Helm hook that 10.5 had already replaced.
+           #
+           # optional:true, and the secret normally does not exist. Create one
+           # only to override the self-mint; 10.5 will not overwrite a token
+           # an operator has supplied.
             - name: MCP_INVENTORY_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -1,0 +1,477 @@
+package main
+
+// mcpctl submit — hand a server you have built to the people who govern it.
+//
+// ⚠ SUBMITTING IS NOT DEPLOYING, and the distinction is the whole reason this
+// command is safe to put in a developer's hands. It posts an OBSERVATION: a
+// statement that a server exists. Correlation rolls it into inventory_servers,
+// it appears in the review queue, and the AI platform team decides whether and
+// when it is deployed. Nothing becomes routable because a developer ran a CLI.
+//
+// A push-to-deploy button would invert the product. The platform's premise is
+// that an administrator holds the gate; a tool that lets any developer place
+// something on the far side of it is the shape Magertron sells against.
+//
+// WHAT IT IS FOR. Today an administrator DISCOVERS servers by probing for
+// them. This inverts that: a developer volunteers what they built, because
+// submitting is easier than being found. The credential carries the
+// attribution — an admin issues the token to a team, so a submission arrives
+// already saying WHO is asking.
+//
+// REVISIONS WORK. The correlation cascade in mcp-inventory matches on
+// endpoint_url, then (package_ecosystem, package_name), then name+transport.
+// Submitting v2 of a server lands on v1's row rather than beside it — so a
+// second submission of an already-deployed server reads as declared drift,
+// with a known cause, rather than "something changed under us".
+//
+// ⚠ STDIO IS ACCEPTED HERE, and deliberately. The deploy wizard's importer
+// REJECTS stdio as policy — Magertron will not run one. But inventory records
+// what EXISTS, and most of what exists on developer machines is stdio.
+// Recording that the payments team built a stdio server is useful intelligence
+// even though it is undeployable; refusing to record it would throw away the
+// visibility this feature is for. The CLI warns; the platform's policies stop
+// it going further.
+
+import (
+	"archive/zip"
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// ─── wire types — mirror services/mcp-inventory/internal/ingest/types.go ────
+//
+// ⚠ Kept structurally identical to the Go on the other side. If that contract
+// changes, this must change with it — a submission the server rejects is worse
+// than no submission, because the developer believes they are covered.
+
+type obsAgent struct {
+	AgentID       string    `json:"agent_id"`
+	AgentVersion  string    `json:"agent_version"`
+	HostID        string    `json:"host_id"`
+	HostOS        string    `json:"host_os,omitempty"`
+	UserID        string    `json:"user_id,omitempty"`
+	CollectedAt   time.Time `json:"collected_at"`
+}
+
+type obsPackage struct {
+	Ecosystem   string `json:"ecosystem"`
+	Name        string `json:"name"`
+	VersionSpec string `json:"version_spec,omitempty"`
+}
+
+type obsServer struct {
+	DeclaredName string      `json:"declared_name"`
+	Transport    string      `json:"transport"`
+	Command      string      `json:"command,omitempty"`
+	Args         []string    `json:"args,omitempty"`
+	EnvKeys      []string    `json:"env_keys,omitempty"`
+	EndpointURL  string      `json:"endpoint_url,omitempty"`
+	Package      *obsPackage `json:"package,omitempty"`
+	Extra        map[string]any `json:"extra,omitempty"`
+}
+
+type observation struct {
+	ObservationID string    `json:"observation_id"`
+	SourceKind    string    `json:"source_kind"`
+	SourcePath    string    `json:"source_path,omitempty"`
+	ObservedAt    time.Time `json:"observed_at"`
+	Server        obsServer `json:"server"`
+}
+
+type ingestRequest struct {
+	Agent        obsAgent      `json:"agent"`
+	Observations []observation `json:"observations"`
+}
+
+type rejectedItem struct {
+	ObservationID string `json:"observation_id"`
+	Reason        string `json:"reason"`
+}
+
+type ingestResponse struct {
+	AcceptedCount int            `json:"accepted_count"`
+	Rejected      []rejectedItem `json:"rejected"`
+	RequestID     string         `json:"request_id"`
+}
+
+// ─── manifest shapes — MCP Registry server.json, schema 2025-12-11 ──────────
+//
+// ⚠ Field casing is camelCase in the spec (registryType, registryBaseUrl).
+// Older documents use snake_case; both are tolerated on read, matching what
+// ui/src/components/mcpServerJsonImporter.ts does. Do NOT "fix" one to the
+// other — a manifest in the wild may use either.
+
+type mfTransport struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type mfEnvVar struct {
+	Name string `json:"name"`
+}
+
+type mfRemote struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type mfPackage struct {
+	RegistryType    string      `json:"registryType"`
+	RegistryTypeAlt string      `json:"registry_type"`
+	Identifier      string      `json:"identifier"`
+	Name            string      `json:"name"`
+	Version         string      `json:"version"`
+	Transport       mfTransport `json:"transport"`
+	EnvironmentVars []mfEnvVar  `json:"environmentVariables"`
+	EnvVarsAlt      []mfEnvVar  `json:"environment_variables"`
+	RuntimeArgs     []struct {
+		Value string `json:"value"`
+	} `json:"runtimeArguments"`
+}
+
+type manifest struct {
+	Name        string      `json:"name"`
+	Version     string      `json:"version"`
+	Description string      `json:"description"`
+	Remotes     []mfRemote  `json:"remotes"`
+	Packages    []mfPackage `json:"packages"`
+}
+
+// ─── reading the bundle ─────────────────────────────────────────────────────
+
+// readManifest returns the manifest JSON from a .mcpb (a ZIP containing
+// manifest.json) or from a plain server.json / *.json file.
+//
+// Mirrors ui/src/components/ManifestDropZone.tsx, which does the same two
+// things in the browser. One format, two readers — keep them agreeing.
+func readManifest(path string) ([]byte, error) {
+	lower := strings.ToLower(path)
+
+	if strings.HasSuffix(lower, ".mcpb") || strings.HasSuffix(lower, ".zip") {
+		zr, err := zip.OpenReader(path)
+		if err != nil {
+			return nil, fmt.Errorf("could not open %s as a bundle: %w", filepath.Base(path), err)
+		}
+		defer zr.Close()
+
+		for _, f := range zr.File {
+			// Accept manifest.json at the root or one directory down — bundles
+			// are built by several tools and they do not agree on layout.
+			base := strings.ToLower(filepath.Base(f.Name))
+			if base != "manifest.json" {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("could not read manifest.json inside the bundle: %w", err)
+			}
+			defer rc.Close()
+			return io.ReadAll(rc)
+		}
+		return nil, fmt.Errorf("no manifest.json found inside %s", filepath.Base(path))
+	}
+
+	return os.ReadFile(path)
+}
+
+// ─── classification ─────────────────────────────────────────────────────────
+
+// classify maps a manifest onto what the inventory contract needs:
+// a declared_name, a transport, and enough to identify the thing again later.
+//
+// ⚠ This is NOT the deploy wizard's classifier and must not be confused with
+// it. mcpServerJsonImporter.ts answers "can Magertron RUN this?" and rejects
+// what it cannot. This answers "what IS this?" and records it either way.
+// A submission that cannot be deployed is still worth knowing about.
+//
+// Returns the observed server, plus advisory notes for the developer.
+func classify(m *manifest) (obsServer, []string, error) {
+	var notes []string
+
+	name := strings.TrimSpace(m.Name)
+	if name == "" {
+		return obsServer{}, nil, fmt.Errorf("manifest has no name — cannot submit an unnamed server")
+	}
+
+	// ── 1. a remote endpoint. Correlates on endpoint_url, the strongest key.
+	for _, r := range m.Remotes {
+		if u := strings.TrimSpace(r.URL); u != "" {
+			t := normalizeTransport(r.Type)
+			if t == "" {
+				t = "http"
+			}
+			return obsServer{
+				DeclaredName: name,
+				Transport:    t,
+				EndpointURL:  u,
+			}, notes, nil
+		}
+	}
+
+	// ── 2. a package. Correlates on (ecosystem, name) — stable across
+	//       versions, which is what makes a v2 submission update v1's row.
+	for _, p := range m.Packages {
+		reg := firstNonEmpty(p.RegistryType, p.RegistryTypeAlt)
+		ident := firstNonEmpty(p.Identifier, p.Name)
+		if ident == "" {
+			continue
+		}
+
+		transport := normalizeTransport(p.Transport.Type)
+		if transport == "" {
+			transport = "stdio"
+		}
+
+		srv := obsServer{
+			DeclaredName: name,
+			Transport:    transport,
+			EndpointURL:  strings.TrimSpace(p.Transport.URL),
+			Package: &obsPackage{
+				Ecosystem:   strings.ToLower(reg),
+				Name:        ident,
+				VersionSpec: p.Version,
+			},
+			EnvKeys: envKeyNames(p),
+		}
+
+		for _, a := range p.RuntimeArgs {
+			if v := strings.TrimSpace(a.Value); v != "" {
+				srv.Args = append(srv.Args, v)
+			}
+		}
+
+		// ⚠ A remote transport with no URL cannot be reached, and the
+		// validator will reject it. Say so here rather than letting the
+		// developer discover it in a rejected[] entry.
+		if (transport == "http" || transport == "sse") && srv.EndpointURL == "" {
+			return obsServer{}, nil, fmt.Errorf(
+				"package declares %s transport but no url — nothing could reach this server",
+				transport)
+		}
+
+		if transport == "stdio" {
+			notes = append(notes,
+				"transport is stdio: recorded for visibility, but Magertron does "+
+					"not deploy stdio servers. To make it deployable, expose it "+
+					"over streamable-http or sse.")
+			// The validator needs command OR package for stdio; we have the
+			// package, so this passes.
+		}
+
+		if strings.ToLower(reg) != "oci" && transport != "http" && transport != "sse" {
+			notes = append(notes,
+				fmt.Sprintf("registry type %q is not an OCI image: Magertron has "+
+					"nothing to run as a pod. Recorded, not deployable.", reg))
+		}
+
+		return srv, notes, nil
+	}
+
+	return obsServer{}, nil, fmt.Errorf(
+		"manifest describes neither a remote endpoint nor a package — " +
+			"nothing to record. A docs-only server.json cannot be submitted.")
+}
+
+// normalizeTransport maps the registry spelling onto the inventory contract's
+// closed enum: stdio | http | sse. Anything unrecognised returns "" so the
+// caller can default deliberately rather than shipping a value the validator
+// will reject.
+func normalizeTransport(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "stdio":
+		return "stdio"
+	case "sse":
+		return "sse"
+	case "http", "streamable-http", "streamable_http", "streamablehttp":
+		return "http"
+	default:
+		return ""
+	}
+}
+
+// envKeyNames returns environment variable NAMES only.
+//
+// ⚠ NEVER ship values. The inventory contract says so explicitly and it is the
+// reason a developer can be asked to run this at all: a manifest may carry
+// defaults that are secrets, and an inventory system that hoovered them up
+// would be a liability rather than a control.
+func envKeyNames(p mfPackage) []string {
+	var out []string
+	for _, e := range append(p.EnvironmentVars, p.EnvVarsAlt...) {
+		if n := strings.TrimSpace(e.Name); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// ─── ids ────────────────────────────────────────────────────────────────────
+
+// newObservationID returns a lexicographically-sortable id.
+//
+// ⚠ ULID-SHAPED, not a strict ULID — the contract calls for a ULID and this is
+// a timestamp prefix plus randomness, which sorts correctly and does not
+// collide. If a real ULID matters (it does not today; nothing parses it),
+// swap in a library rather than making this cleverer.
+func newObservationID() string {
+	var b [10]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%013x%s", time.Now().UTC().UnixMilli(), hex.EncodeToString(b[:]))
+}
+
+// ─── the command ────────────────────────────────────────────────────────────
+
+type submitOpts struct {
+	Path        string // .mcpb or server.json
+	InventoryURL string // base, e.g. https://host:30444
+	Token       string // JWT carrying inventory:write
+	AgentID     string // the submitting identity — defaults to the token's sub
+	UserID      string
+	DryRun      bool
+}
+
+func runSubmit(o submitOpts) error {
+	raw, err := readManifest(o.Path)
+	if err != nil {
+		return err
+	}
+
+	var m manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("manifest is not valid JSON: %w", err)
+	}
+
+	srv, notes, err := classify(&m)
+	if err != nil {
+		return err
+	}
+
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "unknown-host"
+	}
+
+	req := ingestRequest{
+		Agent: obsAgent{
+			AgentID:      o.AgentID,
+			AgentVersion: "mcpctl",
+			HostID:       host,
+			HostOS:       runtimeOS(),
+			UserID:       o.UserID,
+			CollectedAt:  time.Now().UTC(),
+		},
+		Observations: []observation{{
+			ObservationID: newObservationID(),
+			SourceKind:    "ide_submission",
+			SourcePath:    filepath.Base(o.Path),
+			ObservedAt:    time.Now().UTC(),
+			Server:        srv,
+		}},
+	}
+
+	body, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// ── report what we are about to say, before we say it ──────────────────
+	fmt.Printf("submitting %s\n", srv.DeclaredName)
+	fmt.Printf("  transport   %s\n", srv.Transport)
+	if srv.EndpointURL != "" {
+		fmt.Printf("  endpoint    %s\n", srv.EndpointURL)
+	}
+	if srv.Package != nil {
+		fmt.Printf("  package     %s/%s %s\n",
+			srv.Package.Ecosystem, srv.Package.Name, srv.Package.VersionSpec)
+	}
+	if len(srv.EnvKeys) > 0 {
+		// Names only — worth showing so the developer can SEE that no values
+		// are leaving their machine.
+		fmt.Printf("  env (names) %s\n", strings.Join(srv.EnvKeys, ", "))
+	}
+	for _, n := range notes {
+		fmt.Printf("  note: %s\n", n)
+	}
+
+	if o.DryRun {
+		fmt.Printf("\n--dry-run: not sent. Payload:\n%s\n", body)
+		return nil
+	}
+
+	url := strings.TrimRight(o.InventoryURL, "/") + "/inventory/v1/observations"
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+o.Token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("could not reach the inventory service: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusAccepted, http.StatusOK:
+		var ir ingestResponse
+		_ = json.Unmarshal(respBody, &ir)
+
+		// ⚠ PARTIAL SUCCESS IS THE MODEL. A 202 does not mean everything was
+		// taken — per-observation failures come back in rejected[] without
+		// failing the batch. Read it, or a developer will believe a rejected
+		// submission succeeded.
+		if len(ir.Rejected) > 0 {
+			for _, r := range ir.Rejected {
+				fmt.Printf("\nREJECTED: %s\n", r.Reason)
+			}
+			return fmt.Errorf("submission was not recorded")
+		}
+
+		fmt.Printf("\nsubmitted (request %s)\n", ir.RequestID)
+		fmt.Printf("It is now visible to your platform team for review.\n")
+		fmt.Printf("⚠ This does NOT deploy it — they decide whether and when.\n")
+		return nil
+
+	case http.StatusUnauthorized:
+		return fmt.Errorf("unauthorized: the token is missing, expired, or lacks " +
+			"the inventory:write scope. Ask your administrator for a submission token")
+
+	case http.StatusForbidden:
+		return fmt.Errorf("forbidden: the token was valid but has been revoked, " +
+			"or does not carry inventory:write")
+
+	case http.StatusBadRequest:
+		return fmt.Errorf("the inventory service rejected the batch: %s",
+			strings.TrimSpace(string(respBody)))
+
+	default:
+		return fmt.Errorf("unexpected %d from the inventory service: %s",
+			resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+}
+
+// runtimeOS is split out so the import of "runtime" stays local to it — the
+// rest of this file is deliberately dependency-light.
+func runtimeOS() string {
+	return goRuntimeOS()
+}
