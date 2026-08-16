@@ -74,10 +74,17 @@ info:
 
     ## Namespaces
 
-    There is no namespace-creation endpoint, and none is needed. A namespace is
-    created implicitly when the first server is registered into it. `namespace`
-    is **required** on registration — it is not defaulted, so a script that
-    omits it gets a 400 rather than silently deploying to production.
+    There is no namespace editor in the admin UI and no namespace endpoint in
+    this API — namespaces are not managed as objects.
+
+    A namespace comes into being when a server is registered into it: you name
+    it **explicitly**, in the deploy wizard or in `POST /servers`, and the
+    platform creates the Kubernetes namespace if it does not already exist.
+
+    `namespace` is **required** on registration — it is not defaulted, so
+    omitting it is a 400.
+
+    `GET /namespaces` lists the ones the caller may act in.
 
     ## What v1 commits to
 
@@ -206,8 +213,8 @@ paths:
         own; a platform administrator sees all. The list is therefore an
         accurate statement of reach, not a global inventory.
 
-        There is no create/delete counterpart — see the Namespaces note in the
-        API description.
+        There is no create or delete counterpart. Namespaces are not managed
+        as objects — see the Namespaces note in the API description.
       responses:
         "200":
           description: |
@@ -260,8 +267,9 @@ paths:
         server. The `type` field discriminates, and the required fields differ
         accordingly.
 
-        ⚠ **The namespace is created if it does not exist.** This is the only
-        way to create one.
+        ⚠ **The namespace is created if it does not exist.** Naming it here is
+        the only way a namespace comes into being — there is no namespace
+        endpoint and no namespace editor in the UI.
 
         ⚠ **External servers are not routable until approved.** Registration
         puts them in `Registered`; `POST /servers/{ns}/{name}/approve` moves
@@ -1192,7 +1200,9 @@ components:
           pattern: "^[a-z][a-z0-9-]{2,62}$"
         namespace:
           type: string
-          description: ⚠ Required. Created if it does not exist.
+          description: |
+            ⚠ Required — not defaulted. The Kubernetes namespace is created if
+            it does not already exist.
         image: { type: string }
         image_tag: { type: string, default: latest }
         mcp_port: { type: integer, minimum: 1, maximum: 65535 }
@@ -1233,7 +1243,9 @@ components:
           pattern: "^[a-z][a-z0-9-]{2,62}$"
         namespace:
           type: string
-          description: ⚠ Required. Created if it does not exist.
+          description: |
+            ⚠ Required — not defaulted. The Kubernetes namespace is created if
+            it does not already exist.
         endpoint_url: { type: string, format: uri }
         auth_type:
           type: string
