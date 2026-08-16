@@ -4,10 +4,21 @@
     <title>Magertron Platform API v1</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <style> body { margin: 0; } </style>
+    <style>
+      body { margin: 0; }
+      .menu-content { padding-top: 46px; }
+    </style>
   </head>
   <body>
-    <img src="og-magertron.png" alt="Magertron" style="position:fixed;top:0;left:0;width:220px;height:auto;z-index:100"/>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 46" width="260" height="46"
+         role="img" aria-label="Magertron"
+         style="position:fixed;top:0;left:0;z-index:100">
+      <rect width="260" height="46" fill="#0f1117"/>
+      <polygon points="22,15 34,23 22,31" fill="#6aa9f8"/>
+      <text x="42" y="29" fill="#e8ecf4" letter-spacing="2.5"
+            font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            font-size="17">magertron</text>
+    </svg>
     <redoc spec-url="openapi.yaml"></redoc>
     <script src="redoc.standalone.js"></script>
   </body>
