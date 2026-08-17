@@ -4,9 +4,18 @@
   "description": "Hand an MCP server you have built to the team that governs it.",
   "version": "0.1.0",
   "publisher": "magertron",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
-  "keywords": ["mcp", "model context protocol", "magertron", "governance"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "model context protocol",
+    "magertron",
+    "governance"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -35,25 +44,26 @@
         "magertron.serverUrl": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Your Magertron platform URL, e.g. `https://magertron.example.com:30444`.\n\nAsk your platform team — it is the same address you use for the admin UI."
+          "markdownDescription": "Your Magertron platform URL, e.g. `https://magertron.example.com:30444`.\n\nAsk your platform team \u2014 it is the same address you use for the admin UI."
         },
         "magertron.token": {
           "type": "string",
           "default": "",
-          "markdownDescription": "A service-account token issued to you by your platform administrator.\n\n⚠ **This is a bearer credential.** Anyone holding it can act as your service account. VS Code stores settings in plain text — if your team would rather not have it on disk, leave this empty and run `mcpctl login` in a terminal instead; the extension will use that."
+          "markdownDescription": "A service-account token issued to you by your platform administrator.\n\n\u26a0 **This is a bearer credential.** Anyone holding it can act as your service account. VS Code stores settings in plain text \u2014 if your team would rather not have it on disk, leave this empty and run `mcpctl login` in a terminal instead; the extension will use that."
         },
         "magertron.insecureTls": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Skip TLS certificate verification.\n\n⚠ Only for evaluation installs using a self-signed certificate. Leaving this on against a real deployment means you cannot tell your platform from anything pretending to be it."
+          "markdownDescription": "Skip TLS certificate verification.\n\n\u26a0 Only for evaluation installs using a self-signed certificate. Leaving this on against a real deployment means you cannot tell your platform from anything pretending to be it."
         }
       }
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "compile": "npm run bundle && tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "npx --yes @vscode/vsce package"
+    "package": "npx --yes @vscode/vsce package",
+    "bundle": "mkdir -p bin/linux-x64 && cp ../mcpctl/mcpctl bin/linux-x64/mcpctl"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
