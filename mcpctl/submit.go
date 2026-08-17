@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -53,12 +54,26 @@ import (
 // than no submission, because the developer believes they are covered.
 
 type obsAgent struct {
-	AgentID      string    `json:"agent_id"`
-	AgentVersion string    `json:"agent_version"`
-	HostID       string    `json:"host_id"`
-	HostOS       string    `json:"host_os,omitempty"`
-	UserID       string    `json:"user_id,omitempty"`
-	CollectedAt  time.Time `json:"collected_at"`
+	AgentID string `json:"agent_id"`
+
+	// Which tool submitted this — "mcpctl", "vscode", later "cursor". From
+	// MCPCTL_CLIENT, so a bundled binary identifies its host without a flag.
+	AgentVersion string `json:"agent_version"`
+
+	HostID string `json:"host_id"`
+	HostOS string `json:"host_os,omitempty"`
+
+	// ⚠ A CLAIM, NOT AN IDENTITY. The OS username of whoever ran the command.
+	// Nothing verifies it and anything could set it. It rides along because
+	// "ask Sarah" beats "ask the payments team" when a submission needs a
+	// conversation — and it is worth nothing as evidence.
+	//
+	// ⚠ The orchestrator OVERWRITES user_id with the authenticated subject
+	// before storing. This travels separately so the unverifiable claim and
+	// the stamped identity are never mistaken for one another.
+	UserID string `json:"user_id,omitempty"`
+
+	CollectedAt time.Time `json:"collected_at"`
 }
 
 type obsPackage struct {
@@ -431,6 +446,43 @@ func scrubIn(v any, inCred bool) {
 	}
 }
 
+// clientName reports which tool is submitting.
+//
+// ⚠ From MCPCTL_CLIENT so a BUNDLED binary can identify its host without the
+// host passing a flag. An IDE extension sets it once when it builds the child
+// environment; nothing about the command line changes.
+//
+// Defaults to "mcpctl" — a bare terminal invocation, which is the truth when
+// nothing claims otherwise.
+func clientName() string {
+	if v := strings.TrimSpace(os.Getenv("MCPCTL_CLIENT")); v != "" {
+		// ⚠ Bounded. This reaches a database column and a screen, and an
+		// unbounded client-supplied string in either is somebody else's
+		// incident.
+		if len(v) > 32 {
+			v = v[:32]
+		}
+		return v
+	}
+	return "mcpctl"
+}
+
+// claimedUser reports who the OS says is running this.
+//
+// ⚠ UNVERIFIED, AND CALLERS MUST TREAT IT SO. os/user reads the process owner,
+// which is trivially not the person — a shared CI account, a container running
+// as root, anyone who exported USER before invoking. It is a starting point
+// for a conversation, not an identity.
+//
+// Empty rather than a guess when it cannot be determined: "unknown" would read
+// like a value.
+func claimedUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
+}
+
 // ─── ids ────────────────────────────────────────────────────────────────────
 
 // newObservationID returns a lexicographically-sortable id.
@@ -490,11 +542,14 @@ func runSubmit(gf globalFlags, o submitOpts) error {
 	req := ingestRequest{
 		Agent: obsAgent{
 			AgentID:      o.AgentID,
-			AgentVersion: "mcpctl",
+			AgentVersion: clientName(),
 			HostID:       host,
 			HostOS:       runtimeOS(),
-			UserID:       o.UserID,
-			CollectedAt:  time.Now().UTC(),
+			// ⚠ The --user flag if given, else what the OS claims. Either way
+			// the orchestrator overwrites user_id with the authenticated
+			// subject before storing — this only ever travels as a hint.
+			UserID:      firstNonEmpty(o.UserID, claimedUser()),
+			CollectedAt: time.Now().UTC(),
 		},
 		Observations: []observation{{
 			ObservationID: newObservationID(),
@@ -514,6 +569,13 @@ func runSubmit(gf globalFlags, o submitOpts) error {
 	// ── report what we are about to say, before we say it ──────────────────
 	fmt.Printf("submitting %s\n", srv.DeclaredName)
 	fmt.Printf("  transport   %s\n", srv.Transport)
+	fmt.Printf("  via         %s\n", req.Agent.AgentVersion)
+	if req.Agent.UserID != "" {
+		// ⚠ Say it is a claim, on screen, where the developer running it can
+		// see exactly what is being sent about them. A tool that reports on
+		// people should show them what it reports.
+		fmt.Printf("  claimed as  %s (unverified)\n", req.Agent.UserID)
+	}
 	if srv.EndpointURL != "" {
 		fmt.Printf("  endpoint    %s\n", srv.EndpointURL)
 	}

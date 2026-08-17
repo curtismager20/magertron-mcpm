@@ -135,6 +135,38 @@ data:
 
     INSERT INTO schema_migrations (version) VALUES ('001_initial')
         ON CONFLICT (version) DO NOTHING;
+    -- ── attribution columns on inventory_observations ───────────────────────
+    --
+    -- ⚠ WHO submitted, HOW, and FROM WHERE — at three different levels of
+    -- trust, kept in separate columns so nothing presents a claim as a fact.
+    --
+    --   submitted_via  CLAIMED. Which tool: "mcpctl", "vscode", "cursor". The
+    --                  client says so and nothing verifies it. Useful for
+    --                  deciding where to ask a question; useless as evidence.
+    --
+    --   src_ip         OBSERVED. The address the orchestrator actually saw the
+    --                  connection arrive from. ⚠ Never taken from the client:
+    --                  a client-reported address is whatever it chooses to
+    --                  say, and a laptop behind NAT reports a private range no
+    --                  matter what.
+    --
+    -- agent_id (already present) is the STAMPED service-account subject and
+    -- remains the only identity the platform knows. These two sit beside it
+    -- rather than blurring into it.
+    --
+    -- ⚠ NULLABLE, deliberately. Every observation recorded before today has
+    -- neither, and back-filling a guess would put invented provenance in an
+    -- audit trail. Absent means "we did not record this", which is true.
+    --
+    -- ⚠ ADD COLUMN IF NOT EXISTS is genuinely idempotent, unlike the CHECK
+    -- constraint below — SchemaGuard re-applies this file on every
+    -- orchestrator start, and an unguarded migration that runs forever is how
+    -- a "runs once" backfill silently re-billed prepaid contracts on
+    -- 2026-08-14.
+    ALTER TABLE inventory_observations
+        ADD COLUMN IF NOT EXISTS submitted_via TEXT,
+        ADD COLUMN IF NOT EXISTS src_ip        TEXT;
+
     -- ── widen inventory_servers.state ────────────────────────────────────────
     --
     -- A submission needs somewhere to GO once an operator has dealt with it.
