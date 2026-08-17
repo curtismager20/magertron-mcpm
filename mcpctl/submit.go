@@ -71,7 +71,7 @@ type obsAgent struct {
 	// ⚠ The orchestrator OVERWRITES user_id with the authenticated subject
 	// before storing. This travels separately so the unverifiable claim and
 	// the stamped identity are never mistaken for one another.
-	UserID string `json:"user_id,omitempty"`
+	ClaimedUser string `json:"claimed_user,omitempty"`
 
 	CollectedAt time.Time `json:"collected_at"`
 }
@@ -548,7 +548,7 @@ func runSubmit(gf globalFlags, o submitOpts) error {
 			// ⚠ The --user flag if given, else what the OS claims. Either way
 			// the orchestrator overwrites user_id with the authenticated
 			// subject before storing — this only ever travels as a hint.
-			UserID:      firstNonEmpty(o.UserID, claimedUser()),
+			ClaimedUser: firstNonEmpty(o.UserID, claimedUser()),
 			CollectedAt: time.Now().UTC(),
 		},
 		Observations: []observation{{
@@ -570,11 +570,11 @@ func runSubmit(gf globalFlags, o submitOpts) error {
 	fmt.Printf("submitting %s\n", srv.DeclaredName)
 	fmt.Printf("  transport   %s\n", srv.Transport)
 	fmt.Printf("  via         %s\n", req.Agent.AgentVersion)
-	if req.Agent.UserID != "" {
+	if req.Agent.ClaimedUser != "" {
 		// ⚠ Say it is a claim, on screen, where the developer running it can
 		// see exactly what is being sent about them. A tool that reports on
 		// people should show them what it reports.
-		fmt.Printf("  claimed as  %s (unverified)\n", req.Agent.UserID)
+		fmt.Printf("  claimed as  %s (unverified)\n", req.Agent.ClaimedUser)
 	}
 	if srv.EndpointURL != "" {
 		fmt.Printf("  endpoint    %s\n", srv.EndpointURL)

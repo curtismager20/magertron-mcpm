@@ -165,6 +165,7 @@ data:
     -- 2026-08-14.
     ALTER TABLE inventory_observations
         ADD COLUMN IF NOT EXISTS submitted_via TEXT,
+        ADD COLUMN IF NOT EXISTS claimed_user  TEXT,
         ADD COLUMN IF NOT EXISTS src_ip        TEXT;
 
     -- ── widen inventory_servers.state ────────────────────────────────────────
