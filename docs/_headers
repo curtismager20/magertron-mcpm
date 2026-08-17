@@ -6,3 +6,7 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+/vscode/*.vsix
+  Content-Type: application/octet-stream
+  Content-Disposition: attachment
