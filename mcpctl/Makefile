@@ -21,6 +21,7 @@ dist:
 	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/$(BINARY)-darwin-amd64 .
 	GOOS=linux  GOARCH=amd64 go build -ldflags="-s -w" -o dist/$(BINARY)-linux-amd64  .
 	GOOS=linux  GOARCH=arm64 go build -ldflags="-s -w" -o dist/$(BINARY)-linux-arm64  .
+	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/$(BINARY)-windows-amd64.exe .
 	cd dist && shasum -a 256 $(BINARY)-* > SHA256SUMS
 
 # Build Debian/Ubuntu .deb packages for amd64 + arm64.

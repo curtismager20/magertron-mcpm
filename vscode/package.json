@@ -62,8 +62,8 @@
   "scripts": {
     "compile": "npm run bundle && tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "npx --yes @vscode/vsce package",
-    "bundle": "mkdir -p bin/linux-x64 && cp ../mcpctl/mcpctl bin/linux-x64/mcpctl"
+    "package": "npm run compile && npx --yes @vscode/vsce package",
+    "bundle": "./bundle-binaries.sh"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
