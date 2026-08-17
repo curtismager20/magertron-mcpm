@@ -1,0 +1,63 @@
+{
+  "name": "magertron-submit",
+  "displayName": "Magertron",
+  "description": "Hand an MCP server you have built to the team that governs it.",
+  "version": "0.1.0",
+  "publisher": "magertron",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "keywords": ["mcp", "model context protocol", "magertron", "governance"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "magertron.submit",
+        "title": "Magertron: Submit MCP Server for Review"
+      },
+      {
+        "command": "magertron.status",
+        "title": "Magertron: Show Connection Status"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "magertron.submit",
+          "when": "resourceFilename =~ /\\.(mcpb|json)$/",
+          "group": "magertron"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Magertron",
+      "properties": {
+        "magertron.serverUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Your Magertron platform URL, e.g. `https://magertron.example.com:30444`.\n\nAsk your platform team — it is the same address you use for the admin UI."
+        },
+        "magertron.token": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "A service-account token issued to you by your platform administrator.\n\n⚠ **This is a bearer credential.** Anyone holding it can act as your service account. VS Code stores settings in plain text — if your team would rather not have it on disk, leave this empty and run `mcpctl login` in a terminal instead; the extension will use that."
+        },
+        "magertron.insecureTls": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Skip TLS certificate verification.\n\n⚠ Only for evaluation installs using a self-signed certificate. Leaving this on against a real deployment means you cannot tell your platform from anything pretending to be it."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx --yes @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
