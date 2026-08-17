@@ -47,7 +47,7 @@ data:
         package_ecosystem    TEXT,
         package_name         TEXT,
         state                TEXT NOT NULL DEFAULT 'discovered'
-                                CHECK (state IN ('discovered','adopted','deprecated')),
+                                CHECK (state IN ('discovered','staged','adopted','dismissed','deprecated')),
         first_seen_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_seen_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
         observation_count    INTEGER NOT NULL DEFAULT 0,
@@ -135,6 +135,51 @@ data:
 
     INSERT INTO schema_migrations (version) VALUES ('001_initial')
         ON CONFLICT (version) DO NOTHING;
+    -- ── widen inventory_servers.state ────────────────────────────────────────
+    --
+    -- A submission needs somewhere to GO once an operator has dealt with it.
+    -- Without that, the queue stops meaning "awaiting a decision" and becomes a
+    -- log of everything ever submitted — which nobody reads, so submissions
+    -- rot in it.
+    --
+    --   staged     an operator took it — it is being onboarded via the wizard
+    --   dismissed  reviewed and declined; kept, not destroyed
+    --
+    -- ⚠ DISMISSED IS NOT DELETED, deliberately. A governance platform that
+    -- loses the record of a refusal cannot answer "did anyone look at this?".
+    -- The row leaves the default view; the evidence stays.
+    --
+    -- ⚠ AND IT IS NOT 'deprecated'. That already means "was adopted, no longer
+    -- carried" — a different story from "declined at review". Collapsing them
+    -- would make the audit trail ambiguous about which happened.
+    --
+    -- ⚠ IDEMPOTENCE IS THE WHOLE RISK HERE. SchemaGuard re-applies this file on
+    -- EVERY orchestrator start. A CHECK constraint cannot be CREATE IF NOT
+    -- EXISTS'd, so an unguarded DROP/ADD would run forever — and on 2026-08-14
+    -- an unguarded "runs once" backfill in the sibling postgres-init.yaml did
+    -- exactly that, silently re-billing prepaid contracts on every restart.
+    -- This keys on whether the constraint ALREADY mentions 'staged', so a
+    -- second run is a no-op rather than a rewrite.
+    DO $inv_state_widen$
+    BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'inventory_servers')
+           AND NOT EXISTS (
+               SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'inventory_servers'::regclass
+                  AND conname  = 'inventory_servers_state_check'
+                  AND pg_get_constraintdef(oid) LIKE '%staged%')
+        THEN
+            ALTER TABLE inventory_servers
+                DROP CONSTRAINT IF EXISTS inventory_servers_state_check;
+            ALTER TABLE inventory_servers
+                ADD CONSTRAINT inventory_servers_state_check
+                CHECK (state IN ('discovered','staged','adopted',
+                                 'dismissed','deprecated'));
+            RAISE NOTICE 'inventory_servers.state widened: +staged +dismissed';
+        END IF;
+    END $inv_state_widen$;
+
   02-token-grants.sql: |
     -- ─── inventory_token_grants ────────────────────────────────────────────
     -- Audit + revocation for inventory JWT bearer tokens (Pass 2).
@@ -182,3 +227,4 @@ data:
     INSERT INTO schema_migrations (version) VALUES ('002_token_grants')
         ON CONFLICT (version) DO NOTHING;
 {{- end }}
+
