@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Magertron for VS Code — MCP Server Submission</title>
 <meta name="description" content="Submit MCP servers to your Magertron platform from VS Code. Install the extension, point it at your platform, and hand a server to your platform team without leaving the editor.">
+
+<!-- Open Graph — LinkedIn reads these and nothing else. Without og:image
+     there is no preview card. Point og:image at the same asset the rest of
+     the site uses; it must be an ABSOLUTE url. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Magertron">
+<meta property="og:url" content="https://magertron.com/vscode/">
+<meta property="og:title" content="Magertron for VS Code">
+<meta property="og:description" content="Submit MCP servers for review without leaving your editor. Submitted is not deployed — and credentials never leave your machine.">
+<meta property="og:image" content="https://magertron.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Magertron for VS Code">
+<meta name="twitter:description" content="Submit MCP servers for review without leaving your editor.">
+<meta name="twitter:image" content="https://magertron.com/og-image.png">
 <style>
   :root{
     --ink:#0B1220;          /* page */
@@ -163,8 +179,8 @@
     <p class="sub">The extension ships as a <code>.vsix</code> package. It is not on the VS Code Marketplace.</p>
 
     <div class="btns">
-      <!-- TODO: point at the GitHub Release asset once the vscode-v0.1.0 tag exists -->
-      <a class="btn" href="https://github.com/magertron/orchestrator/releases">Download the .vsix</a>
+      <!-- Served from this directory. Bump the filename on each extension release. -->
+      <a class="btn" href="magertron-submit-0.1.0.vsix" download>Download v0.1.0 (.vsix)</a>
       <a class="btn ghost" href="vscode-user-guide.pdf">User guide (PDF)</a>
     </div>
 
