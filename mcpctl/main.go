@@ -56,7 +56,58 @@ func configPath() string {
 	return filepath.Join(dir, "mcpctl", "config.json")
 }
 
+// loadConfig reads the stored credential, with ENVIRONMENT VARIABLES taking
+// precedence over the file.
+//
+// ⚠ WHY ENV WINS. Three callers need to configure mcpctl without owning the
+// developer's home directory:
+//
+//   - an IDE extension bundling this binary — writing to ~/.config/mcpctl
+//     would clobber an existing interactive login, which is rude and
+//     surprising;
+//   - CI, where a login step is one more thing to get wrong and one more
+//     credential written to a disk that outlives the job;
+//   - containers, where there is often no home directory worth writing to.
+//
+// ⚠ Precedence is env-then-file, not file-then-env. An explicit override must
+// beat a stale login — the opposite order means a developer who logged into
+// the wrong cluster months ago silently keeps submitting there, and nothing
+// on screen would say so.
+//
+// Partial overrides are allowed: MCPCTL_SERVER alone, with the token still
+// coming from the file, is a reasonable thing to want.
 func loadConfig() Config {
+	var c Config
+
+	data, err := os.ReadFile(configPath())
+	if err == nil {
+		if err := json.Unmarshal(data, &c); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: config at %s is malformed: %v\n",
+				configPath(), err)
+			c = Config{}
+		}
+	}
+
+	if v := os.Getenv("MCPCTL_SERVER"); v != "" {
+		c.Server = v
+	}
+	if v := os.Getenv("MCPCTL_TOKEN"); v != "" {
+		c.Token = v
+	}
+	if v := os.Getenv("MCPCTL_CA_CERT"); v != "" {
+		c.CACert = v
+	}
+	// ⚠ Only ever turns verification OFF, never on. An env var that could
+	// silently RE-ENABLE verification the operator disabled in the file would
+	// be a confusing failure; one that disables it is an explicit act.
+	if v := os.Getenv("MCPCTL_INSECURE"); v == "1" || v == "true" {
+		c.Insecure = true
+	}
+
+	return c
+}
+
+func loadConfigFileOnly() Config {
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		return Config{}
@@ -276,7 +327,7 @@ func apiRequestRetryLeader(gf globalFlags, method, path string, body interface{}
 	delay := time.Second
 	if first != nil {
 		if ra := first.Header.Get("Retry-After"); ra != "" {
-		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 && secs <= 30 {
+			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 && secs <= 30 {
 				delay = time.Duration(secs) * time.Second
 			}
 		}
@@ -961,12 +1012,12 @@ func cmdRegisterExternal(gf globalFlags, args []string) {
 	// Stay in lock-step with secret_shapes() in src/api/rest_server.cpp.
 	// Adding a new auth_type there → add it here as well.
 	validAuthTypes := map[string]bool{
-		"none":                       true,
-		"bearer":                     true,
-		"api-key":                    true,
-		"oauth2-client-credentials":  true,
-		"oauth2-authorization-code":  true,
-		"mtls":                       true,
+		"none":                      true,
+		"bearer":                    true,
+		"api-key":                   true,
+		"oauth2-client-credentials": true,
+		"oauth2-authorization-code": true,
+		"mtls":                      true,
 	}
 	if !validAuthTypes[authType] {
 		fmt.Fprintf(os.Stderr,
@@ -1607,7 +1658,6 @@ NOTES:
   will return a clear error if the feature isn't licensed.
 `, version)
 }
-
 
 // ============================================================================
 // v2.0 ADDITIONS BELOW
@@ -2520,10 +2570,10 @@ func cmdRetentionStatus(gf globalFlags) {
 		RetentionEnabled bool   `json:"retention_enabled"`
 		NextRunAt        string `json:"next_run_at"`
 		Tables           []struct {
-			Name             string  `json:"name"`
-			RowCount         int64   `json:"row_count"`
-			SizeBytes        int64   `json:"size_bytes"`
-			OldestRowUnixSec *int64  `json:"oldest_row_unix_sec"`
+			Name             string `json:"name"`
+			RowCount         int64  `json:"row_count"`
+			SizeBytes        int64  `json:"size_bytes"`
+			OldestRowUnixSec *int64 `json:"oldest_row_unix_sec"`
 			RetentionPolicy  *struct {
 				Enabled       bool `json:"enabled"`
 				RetentionDays int  `json:"retention_days"`
@@ -2675,8 +2725,6 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-
 
 // str safely extracts a string from a map[string]interface{} value.
 // ⚠ Returns "" for nil or non-string rather than panicking — API responses
@@ -2874,7 +2922,6 @@ func cmdRoutingDelete(gf globalFlags, id string) {
 	fmt.Println("  That caller now has no model route; its next unnamed call will be refused.")
 }
 
-
 // ─── Cost & chargeback ───────────────────────────────────────────────────────
 //
 // Pro tier (COST_MANAGEMENT). Reads rated_costs — the rating engine's output,
@@ -2904,13 +2951,25 @@ func cmdCostReport(gf globalFlags, args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--view":
-			if i+1 < len(args) { view = args[i+1]; i++ }
+			if i+1 < len(args) {
+				view = args[i+1]
+				i++
+			}
 		case "--from":
-			if i+1 < len(args) { from = args[i+1]; i++ }
+			if i+1 < len(args) {
+				from = args[i+1]
+				i++
+			}
 		case "--to":
-			if i+1 < len(args) { to = args[i+1]; i++ }
+			if i+1 < len(args) {
+				to = args[i+1]
+				i++
+			}
 		case "--server-id", "--vendor":
-			if i+1 < len(args) { serverID = args[i+1]; i++ }
+			if i+1 < len(args) {
+				serverID = args[i+1]
+				i++
+			}
 		}
 	}
 
@@ -2928,12 +2987,22 @@ func cmdCostReport(gf globalFlags, args []string) {
 	}
 
 	q := []string{}
-	if view != "" { q = append(q, "view="+view) }
-	if from != "" { q = append(q, "from="+from) }
-	if to != "" { q = append(q, "to="+to) }
-	if serverID != "" { q = append(q, "server_id="+serverID) }
+	if view != "" {
+		q = append(q, "view="+view)
+	}
+	if from != "" {
+		q = append(q, "from="+from)
+	}
+	if to != "" {
+		q = append(q, "to="+to)
+	}
+	if serverID != "" {
+		q = append(q, "server_id="+serverID)
+	}
 	path := "/billing/report"
-	if len(q) > 0 { path += "?" + strings.Join(q, "&") }
+	if len(q) > 0 {
+		path += "?" + strings.Join(q, "&")
+	}
 
 	body, err := apiGet(gf, path)
 	if err != nil {
@@ -2969,23 +3038,31 @@ func cmdCostReport(gf globalFlags, args []string) {
 	printed := false
 	for _, r := range rows {
 		m, ok := r.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		if !printed {
 			fmt.Fprintln(tw, "SUBJECT\tSERVER\tCOST CENTRE\tCOST (USD)")
 			printed = true
 		}
 		label := str(m["dept_name"])
 		for _, k := range []string{"caller_display", "server_name", "namespace"} {
-			if label == "" { label = str(m[k]) }
+			if label == "" {
+				label = str(m[k])
+			}
 		}
-		if label == "" { label = "(unattributed)" }
+		if label == "" {
+			label = "(unattributed)"
+		}
 		// ⚠ cost_usd, not amount_usd. And cost_center is worth showing — it is
 		// the code a finance system actually keys on.
 		// ⚠ The department view returns one row PER SERVER per department, so
 		// a name repeats legitimately. Without the server column it reads as
 		// duplicate rows rather than a breakdown.
 		srv := str(m["server_name"])
-		if srv == "" { srv = "—" }
+		if srv == "" {
+			srv = "—"
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%v\n", label, srv, str(m["cost_center"]), m["cost_usd"])
 	}
 	tw.Flush()
@@ -2994,7 +3071,9 @@ func cmdCostReport(gf globalFlags, args []string) {
 	var total float64
 	for _, r := range rows {
 		if m, ok := r.(map[string]interface{}); ok {
-			if v, ok := m["cost_usd"].(float64); ok { total += v }
+			if v, ok := m["cost_usd"].(float64); ok {
+				total += v
+			}
 		}
 	}
 	fmt.Printf("\nTotal: %.2f USD\n", total)
@@ -3003,10 +3082,18 @@ func cmdCostReport(gf globalFlags, args []string) {
 // nextMonth turns YYYY-MM-01 into the following YYYY-MM-01, for the half-open
 // hint above.
 func nextMonth(p string) string {
-	if len(p) < 7 { return p }
+	if len(p) < 7 {
+		return p
+	}
 	var y, m int
-	if _, err := fmt.Sscanf(p[:7], "%d-%d", &y, &m); err != nil { return p }
-	if m == 12 { y, m = y+1, 1 } else { m++ }
+	if _, err := fmt.Sscanf(p[:7], "%d-%d", &y, &m); err != nil {
+		return p
+	}
+	if m == 12 {
+		y, m = y+1, 1
+	} else {
+		m++
+	}
 	return fmt.Sprintf("%04d-%02d-01", y, m)
 }
 
@@ -3077,7 +3164,9 @@ func cmdDepartmentsList(gf globalFlags) {
 	fmt.Fprintln(tw, "NAME\tNAMESPACE\tCOST CENTRE\tMEMBERS")
 	for _, d := range resp.Departments {
 		cc := str(d["cost_center"])
-		if cc == "" { cc = "—" }
+		if cc == "" {
+			cc = "—"
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%v\n",
 			str(d["name"]), str(d["namespace"]), cc, d["member_count"])
 	}
@@ -3126,7 +3215,9 @@ func cmdDepartmentsMembers(gf globalFlags, id string) {
 	fmt.Fprintln(tw, "SUBJECT\tFROM\tTO")
 	for _, m := range resp.Items {
 		to := str(m["effective_to"])
-		if to == "" { to = "(current)" }
+		if to == "" {
+			to = "(current)"
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", str(m["subject"]), str(m["effective_from"]), to)
 	}
 	tw.Flush()
@@ -3137,9 +3228,15 @@ func cmdDepartmentsCreate(gf globalFlags, args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--name":
-			if i+1 < len(args) { name = args[i+1]; i++ }
+			if i+1 < len(args) {
+				name = args[i+1]
+				i++
+			}
 		case "--cost-center", "--cost-centre":
-			if i+1 < len(args) { costCenter = args[i+1]; i++ }
+			if i+1 < len(args) {
+				costCenter = args[i+1]
+				i++
+			}
 		}
 	}
 	if name == "" {
@@ -3147,14 +3244,15 @@ func cmdDepartmentsCreate(gf globalFlags, args []string) {
 		os.Exit(1)
 	}
 	payload := map[string]interface{}{"name": name}
-	if costCenter != "" { payload["cost_center"] = costCenter }
+	if costCenter != "" {
+		payload["cost_center"] = costCenter
+	}
 	if _, err := apiPost(gf, "/departments", payload); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Department created: %s\n", name)
 }
-
 
 // cmdLoginToken stores a pre-minted service-account token, after proving it works.
 //
@@ -3243,7 +3341,6 @@ func jwtExpiry(token string) string {
 	return time.Unix(int64(exp), 0).UTC().Format("2006-01-02 15:04 UTC")
 }
 
-
 // ─── Inventory / tool-definition drift ───────────────────────────────────────
 //
 // ⚠ Two statuses that look similar and mean different things:
@@ -3301,7 +3398,10 @@ func cmdInventoryList(gf globalFlags, args []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--status":
-			if i+1 < len(args) { status = args[i+1]; i++ }
+			if i+1 < len(args) {
+				status = args[i+1]
+				i++
+			}
 		case "--drifted":
 			status = "drifted"
 		case "--fail-on-drift":
