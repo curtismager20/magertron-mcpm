@@ -353,29 +353,80 @@ func scrubbed(rawJSON []byte) map[string]any {
 	return m
 }
 
-var secretishKeys = map[string]bool{
-	"default": true, "value": true, "password": true, "secret": true,
-	"token": true, "apikey": true, "api_key": true, "credential": true,
+// alwaysSecret — key names that mean a credential wherever they appear. No
+// honest manifest field is called "password" and means something else.
+var alwaysSecret = map[string]bool{
+	"password": true, "secret": true, "token": true,
+	"apikey": true, "api_key": true, "credential": true,
 	"credentials": true, "authorization": true, "client_secret": true,
 	"clientsecret": true, "private_key": true, "privatekey": true,
 }
 
-func scrubValue(v any) {
+// contextualSecret — key names that mean a credential ONLY in a credential
+// position.
+//
+// ⚠ THIS DISTINCTION EXISTS BECAUSE THE BLANKET RULE ATE ARGUMENTS. `value`
+// under environmentVariables may be a secret; `value` under runtimeArguments is
+// a command-line flag. Stripping both turned
+//
+//	"runtimeArguments": [ { "value": "--serve" } ]
+//
+// into
+//
+//	"runtimeArguments": [ {} ]
+//
+// destroying the container's arguments — which the deploy wizard prefills from,
+// so the operator would have onboarded a server that starts wrong, with nothing
+// on screen to say why.
+//
+// ⚠ Over-scrubbing is a failure, not caution. It degrades the artifact the
+// operator is meant to review, and the degradation is invisible.
+var contextualSecret = map[string]bool{
+	"default": true, "value": true,
+}
+
+// credentialContext — is this key a container of credential material?
+//
+// Matched loosely on purpose: "environmentVariables", "environment_variables"
+// and "envVars" all appear in manifests found in the wild, and a spelling this
+// does not recognise fails OPEN (values survive) rather than closed. That is
+// the right direction for a list of NAMES; the always-secret set above is what
+// catches an actual key regardless of where it hides.
+func credentialContext(key string) bool {
+	k := strings.ToLower(key)
+	return strings.Contains(k, "environmentvariable") ||
+		strings.Contains(k, "environment_variable") ||
+		strings.Contains(k, "envvar") ||
+		strings.Contains(k, "env_var")
+}
+
+func scrubValue(v any) { scrubIn(v, false) }
+
+// scrubIn walks the document, carrying whether we are inside a credential
+// position. inCred is inherited: an object nested under environmentVariables
+// is still in a credential position.
+func scrubIn(v any, inCred bool) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, child := range t {
-			if secretishKeys[strings.ToLower(k)] {
-				// ⚠ Delete rather than blank. A key present with an empty
-				// value reads as "the developer set nothing", which is a
-				// different and misleading claim.
+			lower := strings.ToLower(k)
+
+			if alwaysSecret[lower] {
+				// ⚠ Delete rather than blank. A key present with an empty value
+				// reads as "the developer set nothing" — a different and
+				// misleading claim about what was submitted.
 				delete(t, k)
 				continue
 			}
-			scrubValue(child)
+			if inCred && contextualSecret[lower] {
+				delete(t, k)
+				continue
+			}
+			scrubIn(child, inCred || credentialContext(k))
 		}
 	case []any:
 		for _, child := range t {
-			scrubValue(child)
+			scrubIn(child, inCred)
 		}
 	}
 }
