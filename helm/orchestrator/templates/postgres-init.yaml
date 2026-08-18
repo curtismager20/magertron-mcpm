@@ -629,6 +629,72 @@ data:
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- ── governance_policy_versions ──────────────────────────────────────────
+    --
+    -- ⚠ EVIDENCE, NOT CONFIGURATION. governance_policies above holds what is
+    -- in force NOW; this holds what was in force THEN. An execution passport
+    -- asserting "admissible under policy X version 7" is unverifiable unless
+    -- version 7's text can still be produced — so these rows outlive the
+    -- policy they describe.
+    --
+    -- ⚠ APPEND-ONLY. There is deliberately no UPDATE path: a policy change
+    -- writes a NEW version. A row here is a statement about a moment, and
+    -- moments do not change.
+    --
+    -- ⚠ RETENTION IS THE VERIFICATION WINDOW. Purging a version makes every
+    -- passport referencing it unverifiable — which is worse than never having
+    -- signed one, because the object still LOOKS like evidence. These rows are
+    -- text and a hash; a million of them is a rounding error beside
+    -- meter_events. Do not prune them with the diagnostics.
+    CREATE TABLE IF NOT EXISTS governance_policy_versions (
+        -- The row's own identity: precise, and referenceable without a
+        -- two-column foreign key.
+        version_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+        -- ⚠ The policy's STABLE identity across versions. Deliberately NOT a
+        -- foreign key to governance_policies: a version must survive the
+        -- deletion of the policy it describes, or retiring a policy would
+        -- silently invalidate the history that references it.
+        policy_id       UUID        NOT NULL,
+
+        -- Monotonic PER POLICY, starting at 1. Legible in a passport as
+        -- "policy <id> version 7" — which is what a human reads, where the
+        -- uuid is what a machine follows.
+        version         INTEGER     NOT NULL,
+
+        -- ⚠ WHAT PROVES THE CONTENT. Over the semantic fields only — see the
+        -- header. An auditor with the passport and this hash can verify the
+        -- text without trusting policy_id, version, or us.
+        content_hash    TEXT        NOT NULL,
+
+        -- The content itself, so the hash can be checked against something.
+        -- A hash with no preimage proves nothing.
+        name            TEXT        NOT NULL,
+        description     TEXT        NOT NULL DEFAULT '',
+        rules           JSONB       NOT NULL,
+        applies_to_namespaces JSONB NOT NULL,
+        enabled         BOOLEAN     NOT NULL,
+
+        -- Provenance: who made this version, and when it came into force.
+        -- ⚠ created_by is nullable because seeded templates have no author,
+        -- and inventing "system" would assert an actor that never acted.
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by      TEXT,
+
+        -- ⚠ Two policies cannot share a version number, and a version number
+        -- cannot be reused. This constraint is what makes "version 7" mean one
+        -- thing forever.
+        CONSTRAINT governance_policy_versions_unique UNIQUE (policy_id, version)
+    );
+
+    -- Passport verification looks up by (policy_id, version) or by hash;
+    -- both need to be fast at evidence scale.
+    CREATE INDEX IF NOT EXISTS governance_policy_versions_policy_idx
+        ON governance_policy_versions (policy_id, version DESC);
+    CREATE INDEX IF NOT EXISTS governance_policy_versions_hash_idx
+        ON governance_policy_versions (content_hash);
+
     CREATE INDEX IF NOT EXISTS governance_policies_enabled_idx ON governance_policies (enabled);
 
 
