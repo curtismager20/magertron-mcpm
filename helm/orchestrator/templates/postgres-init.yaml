@@ -949,6 +949,53 @@ data:
         updated_by      TEXT,
         UNIQUE (role_id, server_id, pattern_type, tool_pattern, effect)
     );
+
+    -- ── tool permission history: steps 1 & 2 ────────────────────────────────
+    --
+    -- See docs/tool-permission-history-design.md. These two are the SAFE half:
+    -- nothing reads valid_until today, so neither changes any current
+    -- behaviour. They land first so the risky half — close-and-insert, plus
+    -- auditing every reader for `valid_until IS NULL` — can be written
+    -- carefully rather than under pressure.
+    --
+    -- ⚠ WHY THIS TABLE NEEDS HISTORY AT ALL. mcp_tool_permissions is the
+    -- authority behind most calls the gateway admits — a single prompt withheld
+    -- 46 of 121 tools by these rules — and until 2026-08-19 it had no audit
+    -- event of ANY kind (of 55 event kinds, none covered it) and no temporal
+    -- record. A permission that was changed left no trace of what it had been.
+
+    -- ── step 1: uniqueness among rules IN FORCE ─────────────────────────────
+    --
+    -- ⚠ The existing constraint spans ALL rows. Once closed rows accumulate, a
+    -- permission that was revoked and later re-granted collides with its own
+    -- history — the closed row still occupies the constraint. Uniqueness has to
+    -- mean "among the rules currently in force".
+    --
+    -- ⚠ ADDITIVE, NOT A REPLACEMENT. The original constraint stays for now: it
+    -- is harmless while no row is ever closed, and dropping it is a step-3
+    -- concern that belongs with the write-path change. Two overlapping
+    -- constraints are redundant, not wrong.
+    CREATE UNIQUE INDEX IF NOT EXISTS mcp_tool_permissions_open_unique
+        ON mcp_tool_permissions
+           (role_id, server_id, pattern_type, tool_pattern, effect)
+     WHERE valid_until IS NULL;
+
+    -- ── step 2: every rule has an interval START ────────────────────────────
+    --
+    -- ⚠ HONEST BUT LIMITED. "In force since it was created" is true of every
+    -- row today — 0 of 111 carry a valid_until, so nothing has ever been
+    -- closed. It does NOT recover permissions revoked before this lands: those
+    -- were DELETEd outright and are gone, exactly as policy edits before
+    -- versioning are gone.
+    --
+    -- ⚠ Idempotent by its WHERE clause — a second run finds nothing, so this
+    -- is safe under SchemaGuard's re-apply-on-every-start. An unguarded
+    -- "runs once" backfill re-billed prepaid contracts on 2026-08-14; this one
+    -- asks the database what is missing rather than remembering.
+    UPDATE mcp_tool_permissions
+       SET valid_from = created_at
+     WHERE valid_from IS NULL;
+
     CREATE INDEX IF NOT EXISTS idx_tool_perms_lookup ON mcp_tool_permissions (role_id, server_id);
     CREATE INDEX IF NOT EXISTS idx_tool_perms_server ON mcp_tool_permissions (server_id);
     -- Note: a partial-index variant (idx_tool_perms_active WHERE valid_until
