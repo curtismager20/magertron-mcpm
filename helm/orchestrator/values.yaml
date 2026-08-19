@@ -1956,6 +1956,17 @@ secrets:
   #   helm install ... --set-file secrets.jwtPrivateKey=jwt.key \
   #                    --set-file secrets.jwtPublicKey=jwt.pub
   jwtPrivateKey: ""   # PEM-encoded RSA private key (leave empty for auto-gen)
+
+  # Signs authority records (GET /api/v1/evidence/turns/{id}).
+  #
+  # ⚠ Deliberately NOT the JWT key: one key doing both means compromising
+  # either compromises both, and they rotate on different schedules —
+  # rotating this one changes a fingerprint an auditor may have pinned.
+  #
+  # Leave empty to auto-generate. Supply your own with
+  #   --set-file secrets.evidencePrivateKey=evidence.key
+  # if you need the key to live somewhere you control.
+  evidencePrivateKey: ""   # PEM-encoded RSA private key (empty = auto-gen)
   jwtPublicKey: ""    # PEM-encoded RSA public key (derived from private if empty)
 
   # ── Probo GRC secrets (only relevant when probo.enabled=true) ───────────────
