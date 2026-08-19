@@ -975,6 +975,23 @@ data:
     -- is harmless while no row is ever closed, and dropping it is a step-3
     -- concern that belongs with the write-path change. Two overlapping
     -- constraints are redundant, not wrong.
+    -- ⚠ STEP 3 PREREQUISITE — drop the all-rows constraint.
+    --
+    -- UNIQUE (role_id, server_id, pattern_type, tool_pattern, effect) does not
+    -- know about valid_until, so once revocation CLOSES a row instead of
+    -- deleting it, the closed row occupies the slot its own successor needs and
+    -- the insert collides. Re-granting a previously revoked permission would
+    -- fail outright.
+    --
+    -- The partial index below replaces it and means what was always intended:
+    -- uniqueness among the rules IN FORCE.
+    --
+    -- ⚠ Named explicitly rather than dropped by pattern — a wrong guess here
+    -- would silently remove a constraint somebody else depends on.
+    ALTER TABLE mcp_tool_permissions
+        DROP CONSTRAINT IF EXISTS
+        mcp_tool_permissions_role_id_server_id_pattern_type_tool_pa_key;
+
     CREATE UNIQUE INDEX IF NOT EXISTS mcp_tool_permissions_open_unique
         ON mcp_tool_permissions
            (role_id, server_id, pattern_type, tool_pattern, effect)
