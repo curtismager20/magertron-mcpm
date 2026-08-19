@@ -608,6 +608,33 @@ data:
         updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- ⚠ EVIDENCE, NOT CONFIGURATION. mcp_tool_permissions names a role; without
+    -- this, what that role GRANTED at the moment of a decision is unrecoverable,
+    -- and an authority record resolves only half a reference.
+    --
+    -- ⚠ NO FOREIGN KEY to roles(id), deliberately — roles already cascades to
+    -- mcp_tool_permissions, and history that cascades is history that vanishes
+    -- when somebody tidies up after an incident.
+    CREATE TABLE IF NOT EXISTS role_versions (
+        version_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        role_id         VARCHAR(255) NOT NULL,
+        version         INTEGER      NOT NULL,
+        content_hash    TEXT         NOT NULL,
+        name            TEXT         NOT NULL,
+        description     TEXT         NOT NULL DEFAULT '',
+        permissions     JSONB        NOT NULL,
+        allowed_namespaces JSONB     NOT NULL,
+        is_admin_tier   BOOLEAN      NOT NULL,
+        created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        created_by      TEXT,
+        CONSTRAINT role_versions_unique UNIQUE (role_id, version)
+    );
+    CREATE INDEX IF NOT EXISTS role_versions_role_idx
+        ON role_versions (role_id, version DESC);
+    CREATE INDEX IF NOT EXISTS role_versions_hash_idx
+        ON role_versions (content_hash);
+
+
     -- Delegated administration: marks roles that confer administrative scope.
     -- Only a global platform admin may grant or create an is_admin_tier role
     -- (enforced in rest_server guard_admin_tier_grant + role create/update).
