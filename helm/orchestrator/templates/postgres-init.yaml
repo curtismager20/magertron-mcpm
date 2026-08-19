@@ -74,6 +74,23 @@ data:
     --  network context (src_ip, user_agent),
     --  correlation (request_id, tenant, cluster_uid),
     --  state diffs (old_state, new_state) and OCSF overflow (unmapped).
+    -- ── turn_cache ──────────────────────────────────────────────────────────────
+    --
+    -- ⚠ SHARED, because the in-process map was not. The LLM proxy mints a turn
+    -- on whichever replica served the model call; ext_authz resolves it on
+    -- whichever replica served the tool call. With two replicas those differ
+    -- about half the time, and the exchange split across two turn ids.
+    --
+    -- ⚠ NOT EVIDENCE — a correlation hint. Losing a row costs one prompt its
+    -- grouping and nothing else, which is why set() does not block on it and
+    -- why this is safe to prune aggressively.
+    CREATE TABLE IF NOT EXISTS turn_cache (
+        session_id  TEXT PRIMARY KEY,
+        turn_id     TEXT        NOT NULL,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS turn_cache_updated_idx ON turn_cache (updated_at);
+
     CREATE TABLE IF NOT EXISTS audit_events (
         -- ── Core identity ───────────────────────────────────────────────────
         id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
