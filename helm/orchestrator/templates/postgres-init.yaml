@@ -144,6 +144,20 @@ data:
         -- ── Timestamps ──────────────────────────────────────────────────────
         ts                TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
+
+    -- ⚠ WHEN THE CALLER'S AUTHORITY RAN OUT. The token's own exp, captured at
+    -- decision time because nothing stores it otherwise — it is validated and
+    -- discarded.
+    --
+    -- ⚠ This bounds a DELEGATION too. `on_behalf_of` is a claim on the agent's
+    -- own token, not a second credential, so the agent's expiry is the whole
+    -- limit — there is no intersection to compute.
+    --
+    -- Nullable: a call authenticated some other way has no token exp, and
+    -- inventing one would assert a boundary that did not exist.
+    ALTER TABLE audit_events
+        ADD COLUMN IF NOT EXISTS actor_token_exp TIMESTAMPTZ;
+
     -- ── Prompt correlation (2026-08-04) ───────────────────────────────────
     --
     -- turn_id groups every call ONE user message caused: the model turns, the
