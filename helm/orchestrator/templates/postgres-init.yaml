@@ -1735,10 +1735,21 @@ data:
         ON meter_call_securable (securable_id);
 
 
-    -- One row per (securable, principal, privilege): a re-grant flips allow↔deny
-    -- rather than stacking duplicates (matches UcSecurableStore::add_grant).
-    CREATE UNIQUE INDEX IF NOT EXISTS uc_grant_unique_idx
-        ON uc_grant (securable_id, principal_id, privilege);
+    -- One row per (securable, principal, privilege) IN FORCE: a re-grant flips
+    -- allow<->deny rather than stacking duplicates (matches
+    -- UcSecurableStore::add_grant).
+    --
+    -- The uniqueness is now PARTIAL, and the index that used to live here
+    -- spanned every row. Once revocation began closing grants rather than
+    -- deleting them, a closed row occupied the slot its own successor needed
+    -- and re-granting a revoked privilege silently did nothing — the insert
+    -- conflicted with the closed row, the DO UPDATE left valid_until set, and
+    -- the API reported success.
+    --
+    -- Declared as uc_grant_open_unique above, alongside the interval columns.
+    -- Recreating the all-rows version here would undo that on every schema
+    -- apply, which is exactly what happened on 2026-08-21: the DROP ran, then
+    -- this CREATE put it straight back, on every orchestrator restart.
     -- Resolution walks grants for a securable; index the lookup column.
     CREATE INDEX IF NOT EXISTS uc_grant_securable_idx
         ON uc_grant (securable_id);
