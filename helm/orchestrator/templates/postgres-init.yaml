@@ -1407,6 +1407,41 @@ data:
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- ── uc_grant history ────────────────────────────────────────────────────
+    --
+    -- Revocation CLOSES a grant rather than deleting it, so "could this
+    -- principal read this table at 14:32" is answerable. Unity Catalog is the
+    -- gate no principal bypasses; being unable to prove what it decided
+    -- afterwards was the largest remaining gap in the authority record.
+    ALTER TABLE uc_grant ADD COLUMN IF NOT EXISTS valid_from  TIMESTAMPTZ;
+    ALTER TABLE uc_grant ADD COLUMN IF NOT EXISTS valid_until TIMESTAMPTZ;
+
+    UPDATE uc_grant SET valid_from = created_at WHERE valid_from IS NULL;
+
+    -- A PARTIAL unique index, and the old one must go.
+    --
+    -- uc_grant_unique_idx spans ALL rows. Once a closed grant stays in the
+    -- table it occupies the slot its own successor needs, and re-granting a
+    -- revoked privilege fails outright. Dropping it is a PREREQUISITE of
+    -- closing rather than deleting, not a later tidy-up — the same trap the
+    -- tool-permission work hit on 2026-08-19.
+    DROP INDEX IF EXISTS uc_grant_unique_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS uc_grant_open_unique
+        ON uc_grant (securable_id, principal_id, privilege)
+     WHERE valid_until IS NULL;
+
+    CREATE INDEX IF NOT EXISTS uc_grant_history_idx
+        ON uc_grant (securable_id, valid_until);
+
+    -- The cascade has to go too.
+    --
+    -- A closed grant is a statement about a past moment and must not depend on
+    -- the continued existence of the securable it describes. With the cascade,
+    -- dropping a table from the catalog destroys the record of who could read
+    -- it — at exactly the moment somebody is tidying up after an incident.
+    ALTER TABLE uc_grant DROP CONSTRAINT IF EXISTS uc_grant_securable_id_fkey;
+
+
     DROP TRIGGER IF EXISTS uc_grant_notify_trg ON uc_grant;
     CREATE TRIGGER uc_grant_notify_trg
         AFTER INSERT OR UPDATE OR DELETE ON uc_grant
