@@ -84,7 +84,12 @@ function envFor(): NodeJS.ProcessEnv {
   // ⚠ Identify the tool, so an operator reviewing a submission can see it came
   // from an editor rather than a terminal. Harmless if wrong — it is a
   // convenience for deciding where to ask a question, not an identity.
-  env.MCPCTL_CLIENT = 'vscode';
+  // The editor's own name, not a constant. This extension runs unchanged
+  // in Cursor and other VS Code forks, and hardcoding 'vscode' made a
+  // Cursor submission claim it came from somewhere it did not.
+  env.MCPCTL_CLIENT = vscode.env.appName
+    ? vscode.env.appName.toLowerCase().replace(/\s+/g, '-')
+    : 'vscode';
 
   return env;
 }
