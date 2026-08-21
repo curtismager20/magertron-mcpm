@@ -145,6 +145,19 @@ data:
         ts                TIMESTAMPTZ  NOT NULL DEFAULT NOW()
     );
 
+    -- WHICH catalog object a UC verdict concerned, unambiguously.
+    --
+    -- securable_name alongside it is for reading; this is for resolving. Names
+    -- are unique within a schema, not within a namespace, so an authority
+    -- record joining on the name could match a different table of the same
+    -- name under a different parent.
+    --
+    -- Empty on every other event kind — a tool call has a server, not a
+    -- securable.
+    ALTER TABLE audit_events
+        ADD COLUMN IF NOT EXISTS securable_id UUID;
+
+
     -- ⚠ WHEN THE CALLER'S AUTHORITY RAN OUT. The token's own exp, captured at
     -- decision time because nothing stores it otherwise — it is validated and
     -- discarded.

@@ -3,24 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Magertron for VS Code — MCP Server Submission</title>
-<meta name="description" content="Submit MCP servers to your Magertron platform from VS Code. Install the extension, point it at your platform, and hand a server to your platform team without leaving the editor.">
+<title>Magertron for Cursor — governed MCP servers in your editor</title>
+<meta name="description" content="Use the MCP servers your platform has approved, from inside Cursor. One file from the developer portal lists everything you are entitled to reach — and submit servers you have built for review.">
 
-<!-- Open Graph — LinkedIn reads these and nothing else. Without og:image
-     there is no preview card. Point og:image at the same asset the rest of
-     the site uses; it must be an ABSOLUTE url. -->
+<!-- Open Graph — LinkedIn reads these and nothing else. Absolute urls only. -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Magertron">
-<meta property="og:url" content="https://magertron.com/vscode/">
-<meta property="og:title" content="Magertron for VS Code">
-<meta property="og:description" content="Submit MCP servers for review without leaving your editor. Submitted is not deployed — and credentials never leave your machine.">
-<meta property="og:image" content="https://magertron.com/vscode/og-vscode.png">
+<meta property="og:url" content="https://magertron.com/cursor/">
+<meta property="og:title" content="Magertron for Cursor">
+<meta property="og:description" content="The MCP servers your platform approved, in your editor. Governed at the gateway, with no credential in the config file.">
+<meta property="og:image" content="https://magertron.com/cursor/og-cursor.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Magertron for VS Code">
-<meta name="twitter:description" content="Submit MCP servers for review without leaving your editor.">
-<meta name="twitter:image" content="https://magertron.com/vscode/og-vscode.png">
+<meta name="twitter:title" content="Magertron for Cursor">
+<meta name="twitter:description" content="The MCP servers your platform approved, in your editor.">
+<meta name="twitter:image" content="https://magertron.com/cursor/og-cursor.png">
 <style>
   :root{
     --ink:#0B1220;          /* page */
@@ -146,27 +144,26 @@
 
 <header class="top">
   <div class="wrap">
-    <p class="eyebrow">VS Code Extension</p>
-    <h1>Magertron<span class="tm">™</span> for VS Code</h1>
+    <p class="eyebrow">Cursor</p>
+    <h1>Magertron<span class="tm">&#8482;</span> for Cursor</h1>
     <div class="rule"></div>
     <p class="lede" style="margin-top:18px">
-      Hand an MCP server to your platform team without leaving your editor.
-      One command submits your <code>server.json</code> or <code>.mcpb</code> bundle
-      for review.
+      Use the MCP servers your platform has already approved &mdash; and hand it
+      the ones you build. Both directions, from inside the editor.
     </p>
 
     <div class="gate">
       <div class="gate-step now">
-        <b>1 · Submitted</b>
-        <span>You run the command. The server is recorded — known, not governed.</span>
+        <b>1 &middot; Entitled</b>
+        <span>The portal lists the servers your roles can reach. Nothing else.</span>
       </div>
       <div class="gate-step later">
-        <b>2 · Reviewed</b>
-        <span>An administrator reads what you sent and decides whether to govern it.</span>
+        <b>2 &middot; Configured</b>
+        <span>One file, dropped where Cursor looks. No credential in it.</span>
       </div>
       <div class="gate-step later">
-        <b>3 · Deployed</b>
-        <span>They choose the namespace and supply the credentials you never sent.</span>
+        <b>3 &middot; Governed</b>
+        <span>Every call is authorized and recorded at the gateway, not in your editor.</span>
       </div>
     </div>
   </div>
@@ -175,82 +172,85 @@
 <div class="wrap">
 
   <section>
-    <h2>Install</h2>
-    <p class="sub">The extension ships as a <code>.vsix</code> package. It is not on the VS Code Marketplace.</p>
+    <h2>Add your servers</h2>
+    <p class="sub">Open the developer portal at <code>/portal</code> on your platform's address.</p>
+    <ol>
+      <li>Choose <b>Add to your IDE</b> in the toolbar</li>
+      <li><b>Download <code>mcp.json</code></b>, or <b>Copy to merge</b> if you already have one</li>
+      <li>Save it to <code>~/.cursor/mcp.json</code>, or <code>.cursor/mcp.json</code> in a project</li>
+      <li>Restart Cursor</li>
+    </ol>
+    <p style="margin-top:14px">
+      The file lists every server your roles can reach and nothing they cannot.
+      It works in Cursor, VS Code, Claude Desktop and Windsurf alike &mdash; the
+      format is shared, so this is not a Cursor feature that happens to work
+      elsewhere.
+    </p>
+    <div class="note">
+      <b>No credential is in the file.</b> It references
+      <code>${env:MCP_TOKEN}</code>, so it is safe to commit to a repository or
+      paste into a chat. Mint a token in the portal and export it in your shell
+      profile.
+    </div>
+  </section>
+
+  <section>
+    <h2>Tokens expire</h2>
+    <p class="sub">On purpose. That is the point of a governed platform.</p>
+    <p>
+      A token that lasts a year keeps working long after somebody's access has
+      been revoked, and outlives every role change in between. Yours does not.
+      When calls start failing, mint a new one and restart your editor.
+    </p>
+    <p style="color:var(--muted);font-size:14px;margin:0">
+      Organisations issuing agent credentials through their own identity
+      provider can exchange those for short-lived platform tokens automatically.
+      Ask your platform team.
+    </p>
+  </section>
+
+  <section>
+    <h2>Submit a server you built</h2>
+    <p class="sub">The other direction, and it uses the extension rather than a config file.</p>
 
     <div class="btns">
-      <!-- Served from this directory. Bump the filename on each extension release. -->
-      <a class="btn" href="magertron-submit-0.1.0.vsix" download>Download v0.1.0 (.vsix)</a>
-      <a class="btn ghost" href="vscode-user-guide.pdf">User guide (PDF)</a>
+      <a class="btn" href="/vscode/magertron-submit-0.1.0.vsix" download>Download v0.1.0 (.vsix)</a>
+      <a class="btn ghost" href="/vscode/vscode-user-guide.pdf">User guide (PDF)</a>
     </div>
 
     <h3>From a terminal</h3>
-<pre><code>code --install-extension magertron-submit-&lt;version&gt;.vsix</code></pre>
+<pre><code>cursor --install-extension magertron-submit-&lt;version&gt;.vsix</code></pre>
 
-    <h3>Or from inside VS Code</h3>
-    <ol>
-      <li>Open the <b>Extensions</b> view (<code>Ctrl+Shift+X</code> / <code>Cmd+Shift+X</code>)</li>
-      <li>Click the <b>⋯</b> menu at the top of the panel</li>
-      <li>Choose <b>Install from VSIX…</b>, then select the file</li>
-    </ol>
-
-    <div class="note">
-      <b>Match the version to your platform.</b> The extension bundles the
-      <code>mcpctl</code> binary it speaks to, and the two are versioned together.
-    </div>
-  </section>
-
-  <section>
-    <h2>Configure</h2>
-    <p class="sub">Open Settings (<code>Ctrl+,</code> / <code>Cmd+,</code>) and search for <code>magertron</code>.</p>
-    <table>
-      <thead>
-        <tr><th>Setting</th><th>What to put</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Server Url</td>
-          <td>Your platform's address, the same one you use for the admin UI</td>
-        </tr>
-        <tr>
-          <td>Token</td>
-          <td>A service-account token — or leave it empty and the extension uses your existing <code>mcpctl login</code></td>
-        </tr>
-        <tr>
-          <td>Insecure Tls</td>
-          <td>Only for an evaluation install using a self-signed certificate</td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="note">
-      <b>Leave Token empty if you already use mcpctl.</b> VS Code stores settings
-      in plain text on disk, and a service-account token is a bearer credential.
-      Keeping it in <code>mcpctl login</code> means it stays where it already lives.
-    </div>
-  </section>
-
-  <section>
-    <h2>Submit</h2>
-    <p class="sub">Open your manifest, or right-click it in the Explorer.</p>
-    <ol>
-      <li>Press <code>Ctrl+Shift+P</code></li>
-      <li>Run <b>Magertron: Submit MCP Server for Review</b></li>
-    </ol>
     <p style="margin-top:14px">
-      Anything credential-shaped is removed before the manifest leaves your machine.
-      Environment variable <em>names</em> are sent; values are not, including defaults
-      written into the file. Your platform team can see that a server needs a secret
-      without ever seeing the secret.
+      One extension, both editors. Cursor is a VS Code fork and runs it
+      unchanged &mdash; there is no separate build.
     </p>
-    <p>
-      Full walkthrough, including what gets sent and what to do when a submission
-      is rejected: <a href="vscode-user-guide.pdf">VS Code extension user guide (PDF)</a>.
+
+    <div class="note">
+      <b>Open your project as a folder first.</b> The submit command lives on the
+      file explorer's right-click menu, so it appears on a manifest in the tree.
+      Opening a file on its own leaves nothing to right-click, and it looks as
+      though the extension is not installed.
+    </div>
+
+    <div class="note">
+      <b>Settings live under VS Code's pane, not Cursor's own.</b> If a search for
+      <code>magertron</code> finds nothing, look under
+      <b>Settings &rarr; Extensions &rarr; Magertron</b>. Editing
+      <code>~/.config/Cursor/User/settings.json</code> directly is quicker.
+    </div>
+
+    <p style="margin-top:14px">
+      Anything credential-shaped is removed before the manifest leaves your
+      machine. Environment variable <em>names</em> are sent; values are not,
+      including defaults written into the file. Your platform team can see that
+      a server needs a secret without ever seeing the secret.
     </p>
   </section>
 
   <section>
     <h2>No platform yet?</h2>
-    <p class="sub">Run the orchestrator in your own sandbox and point the extension at it.</p>
+    <p class="sub">Run the orchestrator in your own sandbox and point Cursor at it.</p>
 <pre><code><span class="cmt"># add the chart repository</span>
 helm repo add magertron https://magertron.com/charts
 helm repo update
@@ -262,12 +262,13 @@ helm install mcp magertron/mcp-orchestrator \
       Starts in <b style="color:var(--text)">Free Tier</b>. No license required.
       More at <a href="/charts">magertron.com/charts</a>.
     </p>
-    <p class="soon">Also available for <a href="/cursor/">Cursor</a>. More editors to follow.</p>
+    <p class="soon">Also available for <a href="/vscode/">VS Code</a>.</p>
   </section>
 
   <footer>
-    <a href="/">magertron.com</a> ·
-    <a href="/charts">Helm charts</a> ·
+    <a href="/">magertron.com</a> &middot;
+    <a href="/vscode/">VS Code</a> &middot;
+    <a href="/charts">Helm charts</a> &middot;
     <a href="https://github.com/magertron/orchestrator">GitHub</a>
   </footer>
 
