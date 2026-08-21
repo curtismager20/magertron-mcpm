@@ -3,6 +3,11 @@
   "displayName": "Magertron",
   "description": "Hand an MCP server you have built to the team that governs it.",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/magertron/orchestrator.git",
+    "directory": "vscode"
+  },
   "publisher": "magertron",
   "engines": {
     "vscode": "^1.85.0"
