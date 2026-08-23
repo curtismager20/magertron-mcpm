@@ -197,6 +197,20 @@ data:
     CREATE INDEX IF NOT EXISTS prompt_texts_session_idx ON prompt_texts (session_id);
     CREATE INDEX IF NOT EXISTS prompt_texts_created_idx ON prompt_texts (created_at DESC);
     
+    -- The authority record looks up every event for one turn, and the evidence
+    -- search groups by turn. Neither had an index until 2026-08-23 — twelve
+    -- indexes on this table and none on turn_id, so every record opened was a
+    -- sequential scan over (by then) two million rows.
+    --
+    -- (turn_id, ts) not (turn_id): the record wants the events IN ORDER, and
+    -- the composite serves that and the group-by for very little more.
+    --
+    -- PARTIAL: events not caused by a prompt carry no turn, and indexing rows
+    -- the query can never match is pure cost.
+    CREATE INDEX IF NOT EXISTS audit_events_turn_idx
+        ON audit_events (turn_id, ts)
+     WHERE turn_id IS NOT NULL;
+
     CREATE INDEX IF NOT EXISTS audit_events_ts_idx        ON audit_events (ts DESC);
     CREATE INDEX IF NOT EXISTS audit_events_actor_idx     ON audit_events (actor);
     CREATE INDEX IF NOT EXISTS audit_events_server_idx    ON audit_events (server_name, namespace);
