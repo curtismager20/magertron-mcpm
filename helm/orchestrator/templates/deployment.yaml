@@ -88,23 +88,23 @@ spec:
             # SSO redirect URIs. Should match the URL customers/IdPs use to
             # reach this orchestrator externally. Leave empty to use
             # request-relative URLs.
-            # ── Internal assistant → Magertron's own LLM proxy ─────────────────
-          # A service-account JWT, NOT a vendor key. The assistant calls
-          # /api/v1/llm/{{ns}}/{{server}}/ on this same orchestrator, so the call
-          # is authorized and metered like any other; the gateway injects the
-          # vendor credential from the LLM server's own registration.
-          #
-          # ⚠ optional: true — a fresh install has no token yet, because the
-          #   token is issued by the platform this pod IS. Missing means the
-          #   assistant says it is not configured, which is the honest answer.
-          #   A required ref would crash-loop the orchestrator instead.
-          - name: MAG_SA_JWT
-            valueFrom:
-              secretKeyRef:
-                name: {{ .Values.assistant.externalSecretName | default (printf "%s-assistant" (include "mcp.fullname" .)) }}
-                key: MAG_SA_JWT
-                optional: true
-          - name: MCP_API_PUBLIC_URL
+            # ── Internal assistant → Magertron's own LLM proxy ──────────────
+            # A service-account JWT, NOT a vendor key. The assistant calls the
+            # LLM proxy on this same orchestrator, so the call is authorized
+            # and metered like any other; the gateway injects the vendor
+            # credential from the LLM server's own registration.
+            #
+            # optional: true — a fresh install has no token yet, because the
+            # token is issued by the platform this pod IS. Missing means the
+            # assistant says it is not configured, which is honest. A required
+            # ref would crash-loop the orchestrator instead.
+            - name: MAG_SA_JWT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.assistant.externalSecretName | default (printf "%s-assistant" (include "mcp.fullname" .)) }}
+                  key: MAG_SA_JWT
+                  optional: true
+            - name: MCP_API_PUBLIC_URL
               value: {{ .Values.orchestrator.env.apiPublicUrl | quote }}
             - name: MCP_CORS_EXTRA_ORIGINS
               value: {{ .Values.orchestrator.env.corsExtraOrigins | quote }}
