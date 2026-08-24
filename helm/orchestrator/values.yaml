@@ -651,6 +651,35 @@ mcpSync:
 # OPT-IN: disabled by default so existing installs are unaffected. Enable with a
 # key for the full agent; enabling WITHOUT a key runs the daemon in
 # "plumbing-only" mode (catalog/entitlement works, no LLM loop).
+# ── Internal assistant ────────────────────────────────────────────────────────
+# The assistant docked in the admin UI calls Anthropic through Magertron's OWN
+# LLM proxy — /api/v1/llm/{ns}/{server}/ — rather than calling the vendor
+# directly. So its calls are authorized, metered against the LLM server's
+# contract, and recorded, like any other model call on the platform.
+#
+# That needs a service-account JWT to authenticate AS. The VENDOR key is not
+# here and should not be: it lives on the LLM server's registration, where the
+# gateway injects it.
+#
+# ⚠ CHICKEN AND EGG. This token is issued BY Magertron, so a fresh install has
+# no value to put here. Install, mint a service account holding
+# system:llm-consumer, set this, upgrade. Until then the assistant reports that
+# it is not configured — which is honest, and better than silently calling the
+# vendor direct and ungoverned.
+#
+# ⚠ Leave BOTH this and any orchestrator ANTHROPIC_API_KEY unset rather than
+# setting the latter as a shortcut. A key on the orchestrator means the
+# assistant can fall back to the ungoverned path and work perfectly while
+# proving nothing.
+assistant:
+  # A service-account JWT with system:llm-consumer. mcp-assistant-sa by
+  # convention — the same identity the desktop daemon uses.
+  saJwt: ""
+  # Or reference a secret you manage yourself (recommended for production).
+  # Must contain a key named MAG_SA_JWT. When set, saJwt above is ignored and
+  # no secret is templated.
+  externalSecretName: ""
+
 chatDaemon:
   enabled: true
 
