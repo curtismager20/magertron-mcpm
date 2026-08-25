@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magertron for Claude Code — Governed MCP Tools</title>
+<meta name="description" content="Point Claude Code at your Magertron platform. Every tool call is authorized when it happens, metered against your contracts, and recorded with your name on it.">
+
+<!-- Open Graph — LinkedIn reads these and nothing else. og:image must be an
+     ABSOLUTE url or there is no preview card. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Magertron">
+<meta property="og:url" content="https://magertron.com/claude-code/">
+<meta property="og:title" content="Magertron for Claude Code">
+<meta property="og:description" content="One config file. Every tool call authorized, metered, and recorded — with your name on it, not a shared key's.">
+<meta property="og:image" content="https://magertron.com/claude-code/og-claude-code.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Magertron for Claude Code">
+<meta name="twitter:description" content="Governed MCP tools in your terminal agent.">
+<meta name="twitter:image" content="https://magertron.com/claude-code/og-claude-code.png">
+<style>
+  :root{
+    --ink:#0B1220;          /* page */
+    --panel:#111A2B;        /* raised */
+    --panel-2:#0E1626;      /* code */
+    --line:#1E2B42;
+    --text:#DCE5F2;
+    --muted:#8A9BB4;
+    --dim:#5F718C;
+    --accent:#4A90E2;
+    --accent-dim:#2B5C96;
+    --ok:#4ADE80;
+    --radius:6px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--ink);
+    color:var(--text);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+  .wrap{max-width:760px;margin:0 auto;padding:0 24px}
+
+  /* back link ------------------------------------------------------- */
+  .back{
+    display:inline-flex;align-items:center;gap:7px;
+    font-size:13px;color:var(--muted);margin:0 0 22px;
+    transition:color .15s;
+  }
+  .back:hover{color:var(--text);text-decoration:none}
+  .back .arr{font-size:15px;line-height:1;transition:transform .15s}
+  .back:hover .arr{transform:translateX(-2px)}
+
+  /* header ---------------------------------------------------------- */
+  .top{
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(160deg,#0A1526 0%,#132540 100%);
+  }
+  .top .wrap{padding-top:32px;padding-bottom:44px}
+  .eyebrow{
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);font-weight:600;margin:0 0 14px;
+  }
+  h1{
+    font-size:34px;line-height:1.15;font-weight:700;margin:0 0 6px;
+    letter-spacing:-.01em;
+  }
+  h1 .tm{font-size:.45em;vertical-align:super;font-weight:600}
+  .lede{color:var(--muted);font-size:17px;margin:0;max-width:60ch}
+  .rule{width:52px;height:3px;background:var(--accent);margin:18px 0 0;border-radius:2px}
+
+  /* the gate: signature element ------------------------------------- */
+  .gate{
+    display:flex;flex-wrap:wrap;align-items:stretch;gap:0;
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--panel);margin:34px 0 0;overflow:hidden;
+  }
+  .gate-step{flex:1 1 150px;padding:14px 16px;border-right:1px solid var(--line)}
+  .gate-step:last-child{border-right:0}
+  .gate-step b{display:block;font-size:13px;margin-bottom:2px}
+  .gate-step span{display:block;font-size:12px;color:var(--dim);line-height:1.45}
+  .gate-step.now b{color:var(--ok)}
+  .gate-step.later b{color:var(--dim)}
+  .gate-step.now{background:rgba(74,222,128,.05)}
+
+  /* sections -------------------------------------------------------- */
+  section{padding:40px 0;border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:0}
+  h2{font-size:20px;font-weight:650;margin:0 0 4px;letter-spacing:-.005em}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+  h3{font-size:13px;font-weight:600;margin:22px 0 8px;color:var(--text)}
+  p{margin:0 0 12px}
+  ol{margin:0 0 4px;padding-left:20px;color:var(--muted)}
+  ol li{margin-bottom:6px}
+  ol li b{color:var(--text);font-weight:600}
+
+  pre{
+    background:var(--panel-2);border:1px solid var(--line);
+    border-left:3px solid var(--accent-dim);
+    border-radius:var(--radius);
+    padding:12px 14px;margin:0 0 12px;overflow-x:auto;
+  }
+  code{
+    font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;
+    color:#BFD4EE;
+  }
+  p code,li code,td code{
+    background:var(--panel-2);border:1px solid var(--line);
+    padding:1px 5px;border-radius:3px;font-size:12.5px;
+  }
+  .cmt{color:var(--dim)}
+
+  .btn{
+    display:inline-block;padding:10px 18px;border-radius:var(--radius);
+    background:var(--accent);color:#08111F;font-weight:650;font-size:14px;
+  }
+  .btn:hover{background:#5C9DE8;text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+  .btn.ghost:hover{border-color:var(--accent);background:rgba(74,144,226,.07)}
+  .btns{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 0}
+
+  .note{
+    background:rgba(74,144,226,.06);border-left:3px solid var(--accent);
+    border-radius:0 var(--radius) var(--radius) 0;
+    padding:12px 15px;margin:18px 0 0;font-size:14px;color:var(--muted);
+  }
+  .note b{color:var(--text)}
+
+  table{width:100%;border-collapse:collapse;margin:6px 0 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel);font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  td:first-child{white-space:nowrap;color:var(--text);font-weight:600}
+  td{color:var(--muted)}
+
+  footer{padding:30px 0 50px;color:var(--dim);font-size:13px}
+  footer a{color:var(--muted)}
+  .soon{color:var(--dim);font-size:13px;margin:14px 0 0}
+
+  @media (max-width:600px){
+    h1{font-size:27px}
+    .top .wrap{padding-top:24px;padding-bottom:34px}
+    .gate-step{flex:1 1 100%;border-right:0;border-bottom:1px solid var(--line)}
+    .gate-step:last-child{border-bottom:0}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="back" href="/"><span class="arr" aria-hidden="true">&larr;</span> Back to magertron.com</a>
+    <p class="eyebrow">Claude Code</p>
+    <h1>Magertron<span class="tm">&trade;</span> for Claude Code</h1>
+    <div class="rule"></div>
+    <p class="lede" style="margin-top:18px">
+      Anthropic&rsquo;s terminal agent, pointed at your platform. One config file,
+      one token &mdash; and every tool call it makes is authorized when it happens,
+      billed to a contract, and written down with your name on it.
+    </p>
+
+    <div class="gate">
+      <div class="gate-step now">
+        <b>1 &middot; Called</b>
+        <span>Claude picks a tool and calls it through the gateway, as you.</span>
+      </div>
+      <div class="gate-step later">
+        <b>2 &middot; Judged</b>
+        <span>Your entitlements are evaluated for that call, at that moment.</span>
+      </div>
+      <div class="gate-step later">
+        <b>3 &middot; Recorded</b>
+        <span>Allowed or refused, the decision and the rules behind it are kept.</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <h2>Install</h2>
+    <p class="sub">Claude Code is Anthropic&rsquo;s, not ours. It installs from npm and needs Node 18 or later.</p>
+
+<pre><code>npm install -g @anthropic-ai/claude-code
+claude --version</code></pre>
+
+    <div class="btns">
+      <a class="btn ghost" href="claude-code-user-guide.pdf">User guide (PDF)</a>
+      <a class="btn ghost" href="https://code.claude.com/docs/en/mcp">Anthropic&rsquo;s MCP docs</a>
+    </div>
+
+    <div class="note">
+      <b>Version 2.1.202 or later.</b> Earlier versions report a malformed
+      config as <code>command: expected string, received undefined</code>, which
+      tells you nothing about what is actually wrong.
+    </div>
+  </section>
+
+  <section>
+    <h2>Get your config</h2>
+    <p class="sub">The Developer Portal writes it for you, from the servers you can actually call.</p>
+    <ol>
+      <li>Open the <b>Developer Portal</b> and click <b>Add to IDE</b></li>
+      <li>Choose <b>Claude Code</b> from the dropdown</li>
+      <li>Download the file and save it as <code>.mcp.json</code> at your project root</li>
+    </ol>
+
+    <div class="note">
+      <b>Your browser will drop the leading dot.</b> Most refuse to write a
+      dotfile, so the download arrives as <code>mcp.json</code>. Rename it &mdash;
+      Claude Code looks for <code>.mcp.json</code> and will not find the other.
+    </div>
+
+    <p style="margin-top:14px">
+      Pick the right client in that dropdown. Claude Code needs a
+      <code>type</code> field on every entry and expands
+      <code>${MCP_TOKEN}</code>, where Cursor and VS Code expect
+      <code>${env:MCP_TOKEN}</code>. Give it the wrong one and it either skips
+      the server or sends the literal text as your token &mdash; a 401 that
+      looks like a permissions problem and is not.
+    </p>
+  </section>
+
+  <section>
+    <h2>Authenticate</h2>
+    <p class="sub">Mint a token in the portal, then export it in the shell you will run Claude Code from.</p>
+
+<pre><code>export MCP_TOKEN="&lt;your token&gt;"</code></pre>
+
+    <p style="margin-top:14px">
+      The file itself holds no credential &mdash; only the reference. It is safe
+      to commit, and committing it is the point: your team gets the same servers
+      without anyone mailing a token around.
+    </p>
+
+    <div class="note">
+      <b>The token is yours, not a service account&rsquo;s.</b> Every call
+      Claude Code makes carries it, so the audit trail names a person. When
+      someone asks who ran a query six weeks ago, there is an answer.
+    </div>
+  </section>
+
+  <section>
+    <h2>Approve and connect</h2>
+    <p class="sub">Servers from a project file need your say-so before Claude Code will use them.</p>
+
+<pre><code>cd your-project
+claude</code></pre>
+
+    <p style="margin-top:14px">
+      It asks you to approve the servers it found. That is Claude Code&rsquo;s own
+      safety step, not ours &mdash; a repository you cloned should not be able to
+      silently point your agent at a server you have never seen. Approve them,
+      then check with <code>/mcp</code>.
+    </p>
+
+    <h3>Then ask for something</h3>
+<pre><code>What time is it in Tokyo?</code></pre>
+    <p>
+      Claude picks the tool, calls it through the gateway, and answers. The
+      vendor credential that call needed was injected on the way through. You
+      never held it.
+    </p>
+  </section>
+
+  <section>
+    <h2>When it does not work</h2>
+    <p class="sub">Run <code>claude mcp get &lt;server&gt;</code>. The <code>Issue:</code> line carries the status and whatever the server said.</p>
+    <table>
+      <thead>
+        <tr><th>What you see</th><th>What it means</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Pending approval</td>
+          <td>Run <code>claude</code> in that directory. <code>claude mcp list</code> cannot approve on your behalf</td>
+        </tr>
+        <tr>
+          <td>401</td>
+          <td>Your token is missing, expired, or exported in a different shell than the one you started Claude Code in</td>
+        </tr>
+        <tr>
+          <td>403</td>
+          <td>Magertron refused. You are connected and authenticated but not entitled &mdash; ask your administrator</td>
+        </tr>
+        <tr>
+          <td><code>upstream connect error</code></td>
+          <td>That server&rsquo;s own backend is unreachable. Nothing to do with your setup</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <b>A tool that vanished was probably not revoked.</b> Magertron refuses
+      calls to tool definitions that changed since a human last reviewed them,
+      which is what stops a server quietly widening what it can do after you
+      connected to it. Your administrator approves the new definition and it
+      comes back.
+    </div>
+  </section>
+
+  <section>
+    <h2>Why route through Magertron at all</h2>
+    <p class="sub">You could point Claude Code straight at these servers. Here is what you would be giving up.</p>
+    <table>
+      <thead>
+        <tr><th>Direct</th><th>Through Magertron</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A vendor key per server, on your machine</td>
+          <td>One Magertron token. The gateway holds the vendor credentials and injects them per call</td>
+        </tr>
+        <tr>
+          <td>Whatever the key allows, until someone rotates it</td>
+          <td>Your entitlements as they are at the moment of the call. A grant revoked five minutes ago is already gone</td>
+        </tr>
+        <tr>
+          <td>Spend on a shared key nobody can attribute</td>
+          <td>Cost against a contract, attributed to you</td>
+        </tr>
+        <tr>
+          <td>Whatever the vendor happens to log</td>
+          <td>Who called, what the rules were at the time, and what was decided &mdash; signed, and reconstructed from the audit trail on read</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Terminal notes</h2>
+    <p class="sub">Claude Code redraws as it works, which some terminals take better than others.</p>
+    <p>
+      In Konsole, copy and paste are <code>Ctrl+Shift+C</code> and
+      <code>Ctrl+Shift+V</code> &mdash; plain <code>Ctrl+C</code> interrupts.
+      For one question without the interactive interface:
+    </p>
+<pre><code>claude -p "what time is it in Tokyo?"</code></pre>
+    <p>
+      That prints an answer and exits. It cannot approve project servers, so run
+      <code>claude</code> interactively once first.
+    </p>
+    <p>
+      Claude Code also has extensions for VS Code and JetBrains, which run the
+      same agent inside your editor. The configuration is identical &mdash; the
+      same <code>.mcp.json</code>, in the same place.
+    </p>
+  </section>
+
+</div>
+
+</body>
+</html>
