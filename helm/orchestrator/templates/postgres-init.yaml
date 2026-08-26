@@ -2292,6 +2292,40 @@ data:
      '["*"]', TRUE)
     ON CONFLICT (id) DO NOTHING;
 
+    -- Agent. The role tool GRANTS are written against — an agent holds this
+    -- and an administrator grants it specific tools per server. Held by
+    -- mcp-assistant-sa (the docked assistant and the desktop daemon) and by
+    -- customer agents.
+    --
+    -- ⚠ Read on five resource types and nothing more. The grants decide what it
+    -- can reach; this role only makes it eligible to be granted.
+    INSERT INTO roles (id, name, description, permissions, allowed_namespaces, system_role) VALUES
+    ('system:agent', 'Agent', 'Service-account role for agents that invoke governed MCP tools. Tool access is granted explicitly per server; the role alone grants nothing.',
+     '[{"actions":1,"namespace":"*","resource_name":"*","resource_type":0},
+       {"actions":1,"namespace":"*","resource_name":"*","resource_type":1},
+       {"actions":1,"namespace":"*","resource_name":"*","resource_type":2},
+       {"actions":1,"namespace":"*","resource_name":"*","resource_type":4},
+       {"actions":1,"namespace":"*","resource_name":"*","resource_type":5}]',
+     '["*"]', TRUE)
+    ON CONFLICT (id) DO NOTHING;
+
+    -- Evidence reader. Held by mcp-evidence-agent so the evidence MCP server
+    -- can read authority records and audit history as itself.
+    --
+    -- ⚠ THE Deploy BIT (actions 5 = Read|Deploy) IS LOAD-BEARING AND MISNAMED.
+    -- handle_turn_evidence() gates on Action::Deploy as the platform's stand-in
+    -- for "this is an operator action", the same way ~41 other handlers do.
+    -- Removing it does not narrow this credential, it breaks it — and the
+    -- symptom is a 403 that reads like a bug in the MCP server.
+    --
+    -- 257 on AuditLog is Read|AuditRead.
+    INSERT INTO roles (id, name, description, permissions, allowed_namespaces, system_role) VALUES
+    ('system:evidence-reader', 'Evidence reader', 'Read authority records and audit history; deploys nothing.',
+     '[{"actions":5,"namespace":"*","resource_name":"*","resource_type":0},
+       {"actions":257,"namespace":"*","resource_name":"*","resource_type":3}]',
+     '["*"]', TRUE)
+    ON CONFLICT (id) DO NOTHING;
+
     -- Model comparison. Held only by the synthetic 'system-compare' subject
     -- the orchestrator signs for when an admin runs a side-by-side.
     --
