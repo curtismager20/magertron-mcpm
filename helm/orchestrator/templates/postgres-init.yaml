@@ -238,6 +238,25 @@ data:
     -- before its DELETE. The retention deletion is itself audited
     -- (RetentionPruneCompleted), so the only sanctioned mutation of the trail is
     -- recorded in the trail. current_setting(...,true) returns NULL when unset
+    -- ⚠ COLUMNS THE C++ WRITES THAT THIS FILE NEVER CREATED. Without them every
+    -- audit write fails — the INSERT names them, Postgres rejects the whole
+    -- statement, DbClient logs an error and resets its audit connection, and
+    -- audit_events stays empty forever while the platform otherwise runs
+    -- perfectly.
+    --
+    -- Found 2026-08-27: a months-old cluster had 34 columns, a fresh install 31.
+    -- securable_id was added here when it landed; securable_name,
+    -- securable_type and tool_name were not.
+    --
+    -- ⚠ ALTER, not just a CREATE TABLE change: an install made before this fix
+    -- has been recording nothing, and needs the columns added on upgrade. What
+    -- it missed is unrecoverable, but it starts recording again from here.
+    ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS securable_name text;
+    ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS securable_type text;
+    ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS tool_name      text;
+    ALTER TABLE sso_login_state ADD COLUMN IF NOT EXISTS return_to text;
+
+
     -- (missing_ok), so normal INSERT/SELECT traffic is unaffected.
     CREATE OR REPLACE FUNCTION audit_events_immutable() RETURNS TRIGGER AS $$
     BEGIN
