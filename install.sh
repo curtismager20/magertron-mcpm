@@ -341,7 +341,7 @@ banner() {
 LICENSE_FILE="${LICENSE_FILE:-}"
 MODE="${MODE:-upgrade}"
 SERVICE_TYPE="${SERVICE_TYPE:-nodeport}"
-NODE_PORT="${NODE_PORT:-30443}"
+NODE_PORT="${NODE_PORT:-30444}"
 CHART_VERSION="${CHART_VERSION:-}"
 NAMESPACE="${NAMESPACE:-mcp-system}"
 SKIP_NODE_LABEL="${SKIP_NODE_LABEL:-0}"
@@ -415,7 +415,7 @@ Common options:
   --mode <upgrade|reinstall>  upgrade preserves data (default).
                               reinstall destroys data for a fresh start.
   --service-type <type>       nodeport (default), loadbalancer, clusterip
-  --node-port <number>        NodePort to pin (default 30443; only used with
+  --node-port <number>        NodePort for the v3 Envoy (default 30444; only used with
                               --service-type nodeport)
   --chart-version <version>   Pin chart version (default: latest --devel)
   --namespace <name>          Install namespace (default mcp-system)
@@ -1078,15 +1078,11 @@ fi
 
 # ─── Pin NodePort (only if service-type=nodeport) ────────────────────────────
 # The chart picks a random NodePort by default. If the customer asked for a
-# specific port (default 30443 to match the historical tooling), patch it
+# specific port (default 30444, the v3 Envoy NodePort), the chart pins it
 # in here. Skip for loadbalancer / clusterip.
-if [ "$SERVICE_TYPE" = "nodeport" ]; then
-    section "Pinning Envoy NodePort to $NODE_PORT"
-    kubectl patch svc -n "$NAMESPACE" mcp-orchestrator-envoy \
-        -p "{\"spec\":{\"ports\":[{\"name\":\"https\",\"port\":443,\"nodePort\":${NODE_PORT},\"targetPort\":10443,\"protocol\":\"TCP\"}]}}" \
-        >/dev/null
-    ok "NodePort pinned to $NODE_PORT"
-fi
+# NodePort is pinned by the chart itself (envoy-v3-service.yaml reads
+# .Values.envoy.v3.nodePort), so there is nothing to patch here. The legacy
+# service this used to patch no longer exists.
 
 # ─── Verify orchestrator inventory admin bootstrap ───────────────────────────
 # The orchestrator self-mints its own inventory admin bootstrap token at

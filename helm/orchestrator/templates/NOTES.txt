@@ -23,18 +23,19 @@ NAMESPACES CREATED
 {{- if eq .Values.loadBalancer.provider "nodeport" }}
 The Envoy Service is exposed via NodePort. Hit your cluster node's IP:
 
-  HTTP:   http://<node-ip>:{{ .Values.loadBalancer.nodeport.httpPort }}
-  HTTPS:  https://<node-ip>:{{ .Values.loadBalancer.nodeport.httpsPort }}
+  HTTPS:  https://<node-ip>:{{ .Values.envoy.v3.nodePort }}
 {{- else if eq .Values.loadBalancer.provider "cloud" }}
 Wait for the cloud LoadBalancer to assign an external IP, then browse to it:
 
-  kubectl get svc {{ include "mcp.fullname" . }}-envoy -n {{ include "mcp.namespace" . }}
+  kubectl get svc {{ include "mcp.fullname" . }}-envoy-v3 -n {{ include "mcp.namespace" . }}
 {{- else if eq .Values.loadBalancer.provider "metallb" }}
 MetalLB will assign an IP from {{ .Values.loadBalancer.metallb.ipRange }}:
 
-  kubectl get svc {{ include "mcp.fullname" . }}-envoy -n {{ include "mcp.namespace" . }}
+  kubectl get svc {{ include "mcp.fullname" . }}-envoy-v3 -n {{ include "mcp.namespace" . }}
 {{- else }}
-Configure your ingress to route to Service {{ include "mcp.fullname" . }}-envoy
+Configure your ingress to route to Service {{ include "mcp.fullname" . }}-envoy-v3
+on port {{ .Values.envoy.v3.listenerPort }} (HTTPS — the listener terminates TLS
+itself, so point your controller at it with backend-protocol HTTPS)
 in namespace {{ include "mcp.namespace" . }}.
 {{- end }}
 
