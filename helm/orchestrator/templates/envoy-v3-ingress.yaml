@@ -1,0 +1,49 @@
+{{- /*
+  envoy-v3-ingress.yaml — optional Ingress in front of the v3 Envoy gateway.
+
+  ⚠ Replaces the Ingress that lived in helm-envoy-service.yaml, which backed
+  onto the LEGACY Envoy Service. That data plane was retired once every server
+  had routing_mode = "v3"; this keeps the same entry point working for anyone
+  who configured loadBalancer.existing.ingress, pointed at the v3 Service.
+
+  Rendered only when the operator has asked for it — same condition as before,
+  so an install that never set these values is unaffected either way.
+*/ -}}
+{{- if and .Values.envoy.v3.enabled
+          (eq .Values.loadBalancer.provider "existing")
+          .Values.loadBalancer.existing.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mcp.fullname" . }}-envoy-v3-ingress
+  namespace: {{ include "mcp.namespace" . }}
+  labels:
+    {{- include "mcp.labels" . | nindent 4 }}
+    component: envoy-gateway-v3
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- /* ⚠ HTTPS, not HTTP as the legacy Ingress had it. The v3 listener
+           terminates TLS itself on 10444; telling the controller to speak
+           plaintext to it gets a handshake failure that reads like a
+           certificate problem. */}}
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+spec:
+  ingressClassName: {{ .Values.loadBalancer.existing.ingress.className | quote }}
+  {{- if .Values.loadBalancer.existing.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.loadBalancer.existing.ingress.host | quote }}
+      secretName: {{ .Values.loadBalancer.existing.ingress.tlsSecretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.loadBalancer.existing.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "mcp.fullname" . }}-envoy-v3
+                port:
+                  number: {{ .Values.envoy.v3.listenerPort }}
+{{- end }}

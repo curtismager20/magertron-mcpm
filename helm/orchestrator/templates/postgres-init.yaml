@@ -251,6 +251,20 @@ data:
     -- ⚠ ALTER, not just a CREATE TABLE change: an install made before this fix
     -- has been recording nothing, and needs the columns added on upgrade. What
     -- it missed is unrecoverable, but it starts recording again from here.
+    -- The catalog-source connectivity test stages a test_only row and returns
+    -- 202, leaving the connector to attempt it on its next poll. It needs a
+    -- status meaning "staged, not yet attempted" — and there was not one, so
+    -- the placeholder insert failed the check constraint every time and the
+    -- test could never report anything. Every install, since it shipped.
+    --
+    -- Drop and re-add rather than skip: 'pending' is additional, so no existing
+    -- row can violate the new form.
+    ALTER TABLE uc_catalog_source
+        DROP CONSTRAINT IF EXISTS uc_catalog_source_last_sync_status_check;
+    ALTER TABLE uc_catalog_source
+        ADD CONSTRAINT uc_catalog_source_last_sync_status_check
+        CHECK (last_sync_status IN ('ok', 'partial', 'failed', 'pending'));
+
     ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS securable_name text;
     ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS securable_type text;
     ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS tool_name      text;
