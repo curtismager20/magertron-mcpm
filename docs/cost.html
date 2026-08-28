@@ -449,7 +449,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
       <a href="cost.html">Cost &amp; Reporting</a>
       <a href="security.html">Security</a>
       <a href="https://github.com/magertron/orchestrator" target="_blank">GitHub</a>
-      <a href="#" class="nav-cta" onclick="openDemoModal(event)">Schedule a Demo</a>
+      <a href="#" class="nav-cta" onclick="openDemoModal(event)">Get a live instance</a>
     </div>
   </div>
 </nav>
@@ -461,7 +461,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
     <h1>Govern the spend.<br><em>Not just the traffic.</em></h1>
     <p class="lede">Tens of thousands of AI agents are transacting through metered MCP servers — and no one owns the budget line. Magertron gives finance a real-time lever on agent spend: per-tool budgets, chargeback by team, and a throttle at the gateway.</p>
     <div class="hero-actions">
-      <a href="#" class="btn-primary" onclick="openDemoModal(event)">Schedule a Demo →</a>
+      <a href="#" class="btn-primary" onclick="openDemoModal(event)">Get a live instance →</a>
       <a href="#dashboard" class="btn-secondary">See the reporting →</a>
     </div>
     <div class="cost-metrics">
@@ -600,7 +600,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
     <h1 style="font-size:clamp(30px,4vw,46px)">Put a brake on agent spend.</h1>
     <p style="max-width:600px;margin:18px auto 0">See the dashboard and chargeback reporting against your own contracts. Free up to 20 MCP servers — the wedge into every team running MCP.</p>
     <div class="hero-actions" style="justify-content:center;margin-top:30px">
-      <a href="#" class="btn-primary" onclick="openDemoModal(event)">Schedule a Demo →</a>
+      <a href="#" class="btn-primary" onclick="openDemoModal(event)">Get a live instance →</a>
       <a href="https://github.com/magertron/orchestrator" target="_blank" class="btn-secondary">View on GitHub →</a>
     </div>
   </div>
@@ -673,8 +673,8 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 <div class="modal-overlay" id="demoModal" onclick="closeDemoModalOutside(event)">
   <div class="modal">
     <button class="modal-close" onclick="closeDemoModal()">✕</button>
-    <h3 id="demo-modal-title">Schedule a Demo</h3>
-    <p id="demo-modal-subtitle">Tell us about your use case and we'll reach out within one business day.</p>
+    <h3 id="demo-modal-title">Get a live instance</h3>
+    <p id="demo-modal-subtitle">We'll send you a private Magertron instance today — a URL, a login, and a running estate with servers, traffic and audit history already in it. No call, no screen share.</p>
     <div class="form-row">
       <div class="form-group">
         <label>First name</label>
@@ -724,8 +724,8 @@ function openDemoModal(e, mode) {
     if (title) title.textContent = 'Contact us';
     if (subtitle) subtitle.textContent = 'Send us a message and we\u2019ll reply within one business day.';
   } else {
-    if (title) title.textContent = 'Schedule a Demo';
-    if (subtitle) subtitle.textContent = 'Tell us about your use case and we\u2019ll reach out within one business day.';
+    if (title) title.textContent = 'Get a live instance';
+    if (subtitle) subtitle.textContent = 'We\u2019ll send you a private Magertron instance today \u2014 a URL, a login, and a running estate with servers, traffic and audit history already in it. No call, no screen share.';
   }
 
   document.getElementById('demoModal').classList.add('open');
@@ -780,9 +780,9 @@ function submitDemoForm() {
       if (card) {
         card.innerHTML = `
           <button class="modal-close" onclick="closeDemoModal()">✕</button>
-          <h3>Thanks — we'll be in touch.</h3>
+          <h3>Got it — your instance is on the way.</h3>
           <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-top: 12px;">
-            Your message is on its way to our team. Expect a reply within one business day.
+            You'll get a URL and a login by email today — a private instance with servers, traffic and audit history already running in it. Nothing to install, no call to book.
             In the meantime, you can <a href="https://github.com/magertron/orchestrator" target="_blank" style="color: var(--border-accent);">browse the source on GitHub</a>
             or kick the tires with <code style="font-family: var(--mono); font-size: 12px; background: var(--bg-card); padding: 2px 6px; border-radius: 4px;">./install.sh</code> (Free tier, no license required).
           </p>

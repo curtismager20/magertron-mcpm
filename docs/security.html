@@ -284,7 +284,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
       <a href="cost.html">Cost &amp; Reporting</a>
       <a href="security.html">Security</a>
       <a href="https://github.com/magertron/orchestrator" target="_blank">GitHub</a>
-      <a href="#" class="nav-cta" onclick="openDemoModal(event)">Schedule a Demo</a>
+      <a href="#" class="nav-cta" onclick="openDemoModal(event)">Get a live instance</a>
     </div>
   </div>
 </nav>
@@ -661,7 +661,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
     <div class="page-cta">
       <h3>Close these gaps in your own Kubernetes cluster.</h3>
       <p>Magertron runs in your cluster, not ours. No data leaves your perimeter. OSS Free up to 20 servers — no signup, no credit card. Try it in 5 minutes.</p>
-      <a href="#" class="btn-primary" onclick="openDemoModal(event)">Schedule a Demo →</a>
+      <a href="#" class="btn-primary" onclick="openDemoModal(event)">Get a live instance →</a>
       <a href="https://github.com/magertron/orchestrator" target="_blank" class="btn-secondary">View on GitHub →</a>
     </div>
 
@@ -737,8 +737,8 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 <div class="modal-overlay" id="demoModal" onclick="if(event.target===this)closeDemoModal()">
   <div style="background:#0c1018;border:1px solid #1a2030;border-radius:16px;padding:40px;width:min(520px,95vw);max-height:90vh;overflow-y:auto;position:relative;animation:fadeUp 0.25s ease-out;">
     <button onclick="closeDemoModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#8694a8;font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>
-    <h3 id="demo-modal-title" style="font-size:22px;font-weight:700;margin-bottom:6px;letter-spacing:-0.02em;">Schedule a Demo</h3>
-    <p id="demo-modal-subtitle" style="font-size:14px;color:#8694a8;margin-bottom:28px;">Tell us about your use case and we'll reach out within one business day.</p>
+    <h3 id="demo-modal-title" style="font-size:22px;font-weight:700;margin-bottom:6px;letter-spacing:-0.02em;">Get a live instance</h3>
+    <p id="demo-modal-subtitle" style="font-size:14px;color:#8694a8;margin-bottom:28px;">We'll send you a private Magertron instance today — a URL, a login, and a running estate with servers, traffic and audit history already in it. No call, no screen share.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
       <div style="display:flex;flex-direction:column;gap:6px;">
         <label style="font-size:12px;font-weight:500;color:#8694a8;text-transform:uppercase;letter-spacing:0.05em;">First name</label>
@@ -812,8 +812,8 @@ function openDemoModal(e, mode) {
     if(title)title.textContent='Contact us';
     if(subtitle)subtitle.textContent='Send us a message and we\u2019ll reply within one business day.';
   } else {
-    if(title)title.textContent='Schedule a Demo';
-    if(subtitle)subtitle.textContent='Tell us about your use case and we\u2019ll reach out within one business day.';
+    if(title)title.textContent='Get a live instance';
+    if(subtitle)subtitle.textContent='We\u2019ll send you a private Magertron instance today \u2014 a URL, a login, and a running estate with servers, traffic and audit history already in it. No call, no screen share.';
   }
   document.getElementById('demoModal').classList.add('open');
   document.body.style.overflow='hidden';
@@ -853,7 +853,7 @@ function submitDemoForm() {
       if(card){
         card.innerHTML=`
           <button onclick="closeDemoModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:24px;cursor:pointer;">\u2715</button>
-          <h3 style="font-family:var(--serif);font-weight:700;font-size:24px;margin-bottom:12px;">Thanks — we'll be in touch.</h3>
+          <h3 style="font-family:var(--serif);font-weight:700;font-size:24px;margin-bottom:12px;">Got it — your instance is on the way.</h3>
           <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">
             Your message is on its way. Expect a reply within one business day. In the meantime, browse the source on <a href="https://github.com/magertron/orchestrator" target="_blank" style="color:var(--border-accent);">GitHub</a>.
           </p>

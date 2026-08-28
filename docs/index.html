@@ -450,13 +450,14 @@ nav .container { display: flex; justify-content: space-between; align-items: cen
 .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .form-group label { font-size: 12px; font-weight: 500; color: #8694a8; text-transform: uppercase; letter-spacing: 0.05em; }
 .form-group input, .form-group textarea, .form-group select {
-  background: #06080c; border: 1px solid #1a2030; border-radius: 8px;
-  padding: 10px 14px; color: #e8ecf4; font-size: 14px; font-family: inherit;
+  background: #b9bfca; border: 1px solid #98a0ad; border-radius: 8px;
+  padding: 10px 14px; color: #0a0d12; font-size: 14px; font-family: inherit;
   transition: border-color 0.2s; outline: none; width: 100%;
 }
+.form-group input::placeholder, .form-group textarea::placeholder { color: #6b7280; }
 .form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: #2563eb; }
 .form-group textarea { resize: vertical; min-height: 90px; }
-.form-group select option { background: #0c1018; }
+.form-group select option { background: #b9bfca; color: #0a0d12; }
 .modal-submit {
   width: 100%; padding: 12px; background: #2563eb; color: white;
   border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
@@ -563,7 +564,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
       <a href="cost.html">Cost &amp; Reporting</a>
       <a href="security.html">Security</a>
       <a href="https://github.com/magertron/orchestrator" target="_blank">GitHub</a>
-      <a href="#" class="nav-cta" onclick="openDemoModal(event)">Schedule a Demo</a>
+      <a href="#" class="nav-cta" onclick="openDemoModal(event)">Get a live instance</a>
     </div>
   </div>
 </nav>
@@ -1349,7 +1350,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
           <li class="disabled">AI Data Reach — govern the data agents can touch</li>
           <li class="disabled">Delegated administration</li>
         </ul>
-        <a href="#" class="pricing-btn primary" onclick="openDemoModal(event)">Schedule a Demo →</a>
+        <a href="#" class="pricing-btn primary" onclick="openDemoModal(event)">Get a live instance →</a>
       </div>
 
       <!-- Enterprise -->
@@ -1390,9 +1391,9 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
   <div class="container">
     <div class="cta-box">
       <h2>Ready to manage AI<br>at enterprise scale?</h2>
-      <p>Start free on GitHub, or talk to us about Pro and Enterprise.</p>
+      <p>Install it yourself from GitHub, or ask for a live instance and we'll send you one today.</p>
       <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
-        <a href="#" class="btn-primary" onclick="openDemoModal(event)">Schedule a Demo →</a>
+        <a href="#" class="btn-primary" onclick="openDemoModal(event)">Get a live instance →</a>
         <a href="https://github.com/magertron/orchestrator" target="_blank" class="btn-secondary">View on GitHub →</a>
       </div>
     </div>
@@ -1469,8 +1470,13 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 <div class="modal-overlay" id="demoModal" onclick="closeDemoModalOutside(event)">
   <div class="modal">
     <button class="modal-close" onclick="closeDemoModal()">✕</button>
-    <h3 id="demo-modal-title">Schedule a Demo</h3>
-    <p id="demo-modal-subtitle">Tell us about your use case and we'll reach out within one business day.</p>
+    <h3 id="demo-modal-title">Get a live instance</h3>
+    <p id="demo-modal-subtitle" style="margin-bottom:14px;">
+      <strong style="color:var(--text-primary);">A private instance, today.</strong>
+      Not a slide deck and not a screen share — a URL and a login to a Magertron
+      of your own, with servers, traffic and audit history already running in it.
+      Bring your own model key and the assistant works too.
+    </p>
     <div class="form-row">
       <div class="form-group">
         <label>First name</label>
@@ -1490,18 +1496,20 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
       <input type="text" id="demo-company" placeholder="Acme Corp" />
     </div>
     <div class="form-group">
-      <label>Interested in</label>
+      <label>What are you hoping to see?</label>
       <select id="demo-tier">
-        <option value="Pro">Pro — $499/mo</option>
-        <option value="Enterprise">Enterprise — Custom pricing</option>
-        <option value="Just looking">Just exploring</option>
+        <option value="Governing agents">Governing what my agents can reach</option>
+        <option value="Cost and spend">Cost attribution and spend control</option>
+        <option value="Audit and evidence">Audit trail and compliance evidence</option>
+        <option value="Data governance">Data access governance (Snowflake, Databricks, BigQuery)</option>
+        <option value="Just looking">Just having a look</option>
       </select>
     </div>
     <div class="form-group">
-      <label>Tell us about your use case</label>
-      <textarea id="demo-message" placeholder="How many MCP servers are you planning to deploy? What's your team size?"></textarea>
+      <label>Anything you want on it? <span style="opacity:.6;font-weight:400">(optional)</span></label>
+      <textarea id="demo-message" placeholder="A particular vendor, a warehouse, a scenario you want to try — or leave this blank."></textarea>
     </div>
-    <button id="demo-submit" class="modal-submit" onclick="submitDemoForm()">Send request →</button>
+    <button id="demo-submit" class="modal-submit" onclick="submitDemoForm()">Send it over →</button>
   </div>
 </div>
 
@@ -1518,8 +1526,8 @@ function openDemoModal(e, mode) {
     if (title) title.textContent = 'Contact us';
     if (subtitle) subtitle.textContent = 'Send us a message and we\u2019ll reply within one business day.';
   } else {
-    if (title) title.textContent = 'Schedule a Demo';
-    if (subtitle) subtitle.textContent = 'Tell us about your use case and we\u2019ll reach out within one business day.';
+    if (title) title.textContent = 'Get a live instance';
+    if (subtitle) subtitle.textContent = 'We\u2019ll send you a private Magertron instance today \u2014 a URL, a login, and a running estate with servers, traffic and audit history already in it. No call, no screen share. Bring your own model key and the assistant works too.';
   }
 
   document.getElementById('demoModal').classList.add('open');
@@ -1574,9 +1582,10 @@ function submitDemoForm() {
       if (card) {
         card.innerHTML = `
           <button class="modal-close" onclick="closeDemoModal()">✕</button>
-          <h3>Thanks — we'll be in touch.</h3>
+          <h3>Got it — your instance is on the way.</h3>
           <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-top: 12px;">
-            Your message is on its way to our team. Expect a reply within one business day.
+            You'll get a URL and a login by email today — a private instance with servers,
+            traffic and audit history already running in it. Nothing to install, no call to book.
             In the meantime, you can <a href="https://github.com/magertron/orchestrator" target="_blank" style="color: var(--border-accent);">browse the source on GitHub</a>
             or kick the tires with <code style="font-family: var(--mono); font-size: 12px; background: var(--bg-card); padding: 2px 6px; border-radius: 4px;">./install.sh</code> (Free tier, no license required).
           </p>
