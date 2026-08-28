@@ -1,15 +1,20 @@
 # MCP Orchestrator — Helm Chart
 
-**Current release:** v2.4.x family (latest: v2.4.12) — Helm chart on [magertron.com/charts](https://magertron.com/charts).
+**Current release:** the 3.6.x family — Helm chart on [magertron.com/charts](https://magertron.com/charts).
+For the exact version being served: `helm repo update magertron && helm search repo magertron/mcp-orchestrator --versions | head -3`
 
 Install guide for the MCP Orchestrator Helm chart, focused on **on-prem and
 private-cloud Kubernetes deployments**. If you're on a managed cloud
 (EKS / GKE / AKS), the chart works there too — see the last appendix.
 
-> **New in v2.4.x:** Service account lifecycle (create, rotate, revoke,
-> expiry reminders), audit log with configurable retention, owner-email
-> identity linking, HMAC-SHA256-signed webhooks. See
-> [Service Account Lifecycle](#service-account-lifecycle) below.
+> **Sizing.** The core platform requests just under 4 cores of CPU and about
+> 4.5 GB of memory — orchestrator, three Envoy replicas, two PostgreSQL
+> instances, the inventory service, and the two bundled MCP servers. Memory is
+> not the constraint; CPU *requests* are, and a 4-core node has no room left for
+> a server of your own. **8 cores is the practical floor** unless you trim
+> replica counts. Add roughly 5 GB and a GPU-free core if you enable the local
+> LLM (Ollama), and more again for the embedded GRC service (Probo) — both are
+> off by default.
 
 ---
 
@@ -185,17 +190,29 @@ Pick one of these based on your environment:
 
 ### NodePort (recommended for single-box / small installs)
 
-Envoy runs as a `NodePort` Service on port 30443 (configurable). You
-configure your firewall or router to forward external 443 (or any port)
-to `<cluster-node-ip>:30443`. Works everywhere, no k8s add-ons required.
+Envoy runs as a `NodePort` Service on port **30444**. You configure your
+firewall, router or tunnel to forward external 443 to
+`<cluster-node-ip>:30444`. Works everywhere, no k8s add-ons required.
 
 **values.yaml**:
 ```yaml
 loadBalancer:
   provider: nodeport
-  nodeport:
-    httpsPort: 30443   # can be 30000-32767
+
+envoy:
+  v3:
+    nodePort: 30444   # can be 30000-32767
 ```
+
+> **If you have read an older copy of this guide, it said 30443.** That was the
+> legacy Envoy data plane, retired once every server moved to `routing_mode:
+> v3`. The port is pinned by the chart and needs no `kubectl patch` step.
+
+> **k3s ships Traefik, which takes 443.** Nothing routes through it to
+> Magertron, so a request to `https://<node-ip>` returns Traefik's own 404
+> rather than the dashboard. Either disable it — `--disable traefik`, or
+> `disable: traefik` in `/etc/rancher/k3s/config.yaml` — or reach the UI on
+> 30444 directly.
 
 ### MetalLB (multi-node bare-metal with LAN IP pool)
 
