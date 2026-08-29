@@ -265,6 +265,59 @@ data:
         ADD CONSTRAINT uc_catalog_source_last_sync_status_check
         CHECK (last_sync_status IN ('ok', 'partial', 'failed', 'pending'));
 
+    -- ── Pinned prompt entitlements ────────────────────────────────────────
+    --
+    -- One row per TURN per SERVER, written the first time a turn touches a
+    -- server. Holds the policies that were in force at that moment, so every
+    -- later call in the same turn is judged against the same set.
+    --
+    -- ⚠ LAZY, not eager. With the optimizer on, most servers a principal could
+    -- reach are never touched — writing rows for all of them would be work done
+    -- for nothing on every turn.
+    --
+    -- ⚠ WRITTEN BUT NOT READ, as of this migration. Enforcement still resolves
+    -- policies live. The read is a later change, behind the same setting.
+    CREATE TABLE IF NOT EXISTS turn_entitlements (
+        turn_id      text        NOT NULL,
+        server_id    uuid        NOT NULL,
+
+        -- Both principals on a delegated turn. The intersection is computed
+        -- from the agent AND the human, so a pin that recorded only one would
+        -- not survive a change to the other.
+        subject      text        NOT NULL,
+        on_behalf_of text,
+
+        -- The policies in force at first touch, as the evaluator sees them.
+        --
+        -- ⚠ EVALUATED, not copied verbatim. mcp_tool_permissions rows carry
+        -- valid_from/valid_until; storing those unresolved would let a
+        -- permission expire mid-turn and the pin would not hold, which is the
+        -- one thing it exists to do.
+        policies     jsonb       NOT NULL,
+
+        -- Magertron's own object bindings (uc_tool_securable, uc_grant) — not
+        -- the warehouse's catalog, which is a synced cache and stays live.
+        uc_grants    jsonb       NOT NULL DEFAULT '[]'::jsonb,
+
+        created_at   timestamptz NOT NULL DEFAULT now(),
+
+        -- ⚠ THE BACKSTOP, NOT THE MECHANISM. Rows are deleted when a turn ends.
+        -- This catches turns that never announce an end: a dead agent, an
+        -- abandoned session, a pod restarting mid-turn.
+        --
+        -- ⚠ It is also the longest a revocation can be delayed once the read
+        -- lands. Five minutes matches the exchanged credential's TTL and is
+        -- defensible; an hour would not be.
+        expires_at   timestamptz NOT NULL,
+
+        PRIMARY KEY (turn_id, server_id)
+    );
+
+    -- Reads are by primary key. This is for the sweep, and for answering
+    -- "what is still open" without a sequential scan.
+    CREATE INDEX IF NOT EXISTS turn_entitlements_expiry_idx
+        ON turn_entitlements (expires_at);
+
     ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS securable_name text;
     ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS securable_type text;
     ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS tool_name      text;

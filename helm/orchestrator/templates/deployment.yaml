@@ -232,6 +232,10 @@ spec:
               value: {{ .Values.orchestrator.env.dbPoolSize | default "8" | quote }}
             - name: MCP_HOT_PATH_CACHE_TTL_SEC
               value: {{ .Values.orchestrator.env.hotPathCacheTtlSeconds | default "5" | quote }}
+            # Write-only until the read lands. See orchestrator.env in
+            # values.yaml for what this costs and what it is for.
+            - name: MCP_PIN_TURN_ENTITLEMENTS
+              value: {{ .Values.orchestrator.env.pinTurnEntitlements | default "0" | quote }}
             # ── 3.2.4x: Unity Catalog + RBAC refresh ─────────────────────
             # The SAME omission as the 3.1.01 block above, and worth naming
             # rather than repeating quietly: these are read by the binary but

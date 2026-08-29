@@ -346,6 +346,30 @@ orchestrator:
     # visibility of server CRUD.
     hotPathCacheTtlSeconds: "60"
 
+    # ── Pinned prompt entitlements ─────────────────────────────────────────
+    # Record the policies a turn was admitted under, once per turn per server,
+    # in turn_entitlements.
+    #
+    # ⚠ WRITE-ONLY AT PRESENT. Nothing reads these rows — enforcement still
+    # resolves policies live on every call, exactly as it does with this off.
+    # Switching it on buys you a table filling up and nothing else. It exists
+    # so the write path and the row lifecycle can be exercised on a real
+    # cluster before anything depends on them.
+    #
+    # What it is FOR, once the read lands: an agentic loop that spans many
+    # calls is judged against one consistent set, rather than one that can
+    # shift underneath it when a grant changes mid-turn.
+    #
+    # ⚠ AND THAT IS A TRADE, not an improvement. Pinning means a revoked grant
+    # is still honoured for the rest of any turn already in flight — the same
+    # kind of compliance number as ucRefreshSeconds below. Rows expire after
+    # five minutes, so that is the ceiling.
+    #
+    # ⚠ It is also STRICTLY MORE WORK, not less. Tool permissions are already
+    # served from a 60-second in-memory cache; a pinned read is a database row
+    # where today there is a memory hit. There is no performance argument here.
+    pinTurnEntitlements: "0"   # "1" | "true" = write the rows · anything else = off
+
     # ── Unity Catalog: data-object governance ────────────────────────────
     # Tool RBAC decides which TOOLS a principal may invoke. Unity Catalog
     # decides which DATA OBJECTS those tools may reach — the second question,
