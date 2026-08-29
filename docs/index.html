@@ -839,12 +839,19 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 
     <!-- Install snippet — visible above the fold for HN/listicle visitors
          who want to see "can I try this in 5 minutes?" answered immediately. -->
-    <div id="install" style="max-width: 720px; margin: 32px auto 0; text-align: left;">
-      <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; text-align: center;">Install in 5 minutes</div>
-      <pre style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; font-family: var(--mono); font-size: 13px; line-height: 1.8; margin: 0; overflow-x: auto; color: var(--text-primary);"><span style="color: var(--text-secondary);">$</span> git clone https://github.com/magertron/orchestrator.git
+    <div style="border-top: 1px solid var(--border); margin-top: 56px; padding-top: 48px;">
+      <div id="install" style="max-width: 720px; margin: 0 auto; text-align: left;">
+      <div style="font-family: var(--serif); font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); margin-bottom: 18px; text-align: center;">Install in 5 minutes</div>
+      <pre style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; font-family: var(--mono); font-size: 13px; line-height: 1.8; margin: 0; overflow-x: auto; color: var(--text-primary);"><span style="color: var(--text-secondary);"># Bare Ubuntu box — installs k3s, helm and Magertron</span>
+<span style="color: var(--text-secondary);">$</span> curl -fsSL https://magertron.com/bootstrap.sh | sudo bash -s -- \
+      --api-public-url https://mcp.example.com
+
+<span style="color: var(--text-secondary);"># Already have a Kubernetes cluster</span>
+<span style="color: var(--text-secondary);">$</span> git clone https://github.com/magertron/orchestrator.git
 <span style="color: var(--text-secondary);">$</span> cd orchestrator
 <span style="color: var(--text-secondary);">$</span> ./install.sh                                  <span style="color: var(--text-secondary);"># Free tier — no license needed</span>
 <span style="color: var(--text-secondary);">$</span> ./install.sh --license /path/to/license.json  <span style="color: var(--text-secondary);"># With a license</span></pre>
+      </div>
     </div>
 
   </div>
