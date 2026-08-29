@@ -9,6 +9,8 @@
     "directory": "vscode"
   },
   "publisher": "magertron",
+  "license": "Apache-2.0",
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },

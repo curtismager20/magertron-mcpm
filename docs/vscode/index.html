@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Magertron for VS Code — MCP Server Submission</title>
-<meta name="description" content="Submit MCP servers to your Magertron platform from VS Code. Install the extension, point it at your platform, and hand a server to your platform team without leaving the editor.">
+<meta name="description" content="Submit MCP servers to your Magertron platform from VS Code or Cursor. Install from the marketplace, point it at your platform, and hand a server to your platform team without leaving the editor.">
 
 <!-- Open Graph — LinkedIn reads these and nothing else. Without og:image
      there is no preview card. Point og:image at the same asset the rest of
@@ -187,23 +187,41 @@
 
   <section>
     <h2>Install</h2>
-    <p class="sub">The extension ships as a <code>.vsix</code> package. It is not on the VS Code Marketplace.</p>
+    <p class="sub">Search for <b>Magertron</b> in your editor's extensions panel, or
+       install it from the registry your editor uses.</p>
 
     <div class="btns">
-      <!-- Served from this directory. Bump the filename on each extension release. -->
-      <a class="btn" href="magertron-submit-0.1.0.vsix" download>Download v0.1.0 (.vsix)</a>
+      <a class="btn" href="https://marketplace.visualstudio.com/items?itemName=magertron.magertron-submit">VS Code Marketplace</a>
+      <a class="btn" href="https://open-vsx.org/extension/magertron/magertron-submit">Open VSX (Cursor, VSCodium, Windsurf)</a>
       <a class="btn ghost" href="vscode-user-guide.pdf">User guide (PDF)</a>
     </div>
 
     <h3>From a terminal</h3>
-<pre><code>code --install-extension magertron-submit-&lt;version&gt;.vsix</code></pre>
+<pre><code>code --install-extension magertron.magertron-submit</code></pre>
+    <p class="sub">Cursor and other forks use the same command with their own
+       binary — <code>cursor --install-extension magertron.magertron-submit</code>.</p>
 
-    <h3>Or from inside VS Code</h3>
+    <h3>Or from inside the editor</h3>
     <ol>
       <li>Open the <b>Extensions</b> view (<code>Ctrl+Shift+X</code> / <code>Cmd+Shift+X</code>)</li>
-      <li>Click the <b>⋯</b> menu at the top of the panel</li>
-      <li>Choose <b>Install from VSIX…</b>, then select the file</li>
+      <li>Search for <b>Magertron</b></li>
+      <li>Click <b>Install</b></li>
     </ol>
+
+    <h3>Air-gapped, or pinning a version</h3>
+    <p class="sub">The <code>.vsix</code> is served directly if your network has no
+       route to a marketplace, or if you need a specific version rather than the
+       newest.</p>
+
+    <div class="btns">
+      <!-- Served from this directory. Bump the filename on each extension release. -->
+      <a class="btn ghost" href="magertron-submit-0.1.0.vsix" download>Download v0.1.0 (.vsix)</a>
+    </div>
+
+<pre><code>code --install-extension magertron-submit-&lt;version&gt;.vsix</code></pre>
+
+    <p class="sub">Or, from inside the editor: the <b>⋯</b> menu at the top of the
+       Extensions panel, then <b>Install from VSIX…</b>.</p>
 
     <div class="note">
       <b>Match the version to your platform.</b> The extension bundles the
