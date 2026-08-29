@@ -1129,9 +1129,9 @@ section "Access"
 case "$SERVICE_TYPE" in
     nodeport)
         # Pick any node's external or internal IP.
-        NODE_IP=$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="ExternalIP")].address}{"\n"}{end}' 2>/dev/null | head -1)
+        NODE_IP=$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="ExternalIP")].address}{"\n"}{end}' 2>/dev/null | head -1 | awk '{print $1}')
         if [ -z "$NODE_IP" ]; then
-            NODE_IP=$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' 2>/dev/null | head -1)
+            NODE_IP=$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' 2>/dev/null | head -1 | awk '{print $1}')
         fi
         echo "  UI / API: https://${NODE_IP}:${NODE_PORT}"
         echo "  (TLS is self-signed; use -k with curl or accept the cert warning.)"
