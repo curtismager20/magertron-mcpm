@@ -368,7 +368,17 @@ orchestrator:
     # ⚠ It is also STRICTLY MORE WORK, not less. Tool permissions are already
     # served from a 60-second in-memory cache; a pinned read is a database row
     # where today there is a memory hit. There is no performance argument here.
-    pinTurnEntitlements: "0"   # "1" | "true" = write the rows · anything else = off
+    # ⚠ AN OVERRIDE, NOT THE SETTING. Leave it EMPTY and the toggle in
+    # Settings governs, read from platform_config and refreshed every 30s.
+    #
+    # Set to any value and it wins outright: the refresh is skipped and the
+    # toggle does nothing. That is deliberate — it is an escape hatch for a
+    # cluster whose UI is unreachable, and for the regression suite, which
+    # should not depend on a database write to set a flag.
+    #
+    # ⚠ "0" is NOT "off" here, it is "override, and the answer is off". To turn
+    # the feature off, leave this empty and use the toggle.
+    pinTurnEntitlements: ""    # "" = Settings governs · "1"/"true" = force on · "0" = force off
 
     # ── Unity Catalog: data-object governance ────────────────────────────
     # Tool RBAC decides which TOOLS a principal may invoke. Unity Catalog

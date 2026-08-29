@@ -232,10 +232,15 @@ spec:
               value: {{ .Values.orchestrator.env.dbPoolSize | default "8" | quote }}
             - name: MCP_HOT_PATH_CACHE_TTL_SEC
               value: {{ .Values.orchestrator.env.hotPathCacheTtlSeconds | default "5" | quote }}
-            # Write-only until the read lands. See orchestrator.env in
-            # values.yaml for what this costs and what it is for.
+            # ⚠ EMITTED ONLY WHEN SET, and the conditional is the point. The
+            # binary treats this variable's PRESENCE as an override — env wins
+            # and the platform_config refresh is skipped entirely. Setting it
+            # unconditionally, even to "0", nailed the flag to false on every
+            # install and made the Settings toggle inert with no error to say so.
+            {{- if .Values.orchestrator.env.pinTurnEntitlements }}
             - name: MCP_PIN_TURN_ENTITLEMENTS
-              value: {{ .Values.orchestrator.env.pinTurnEntitlements | default "0" | quote }}
+              value: {{ .Values.orchestrator.env.pinTurnEntitlements | quote }}
+            {{- end }}
             # ── 3.2.4x: Unity Catalog + RBAC refresh ─────────────────────
             # The SAME omission as the 3.1.01 block above, and worth naming
             # rather than repeating quietly: these are read by the binary but
