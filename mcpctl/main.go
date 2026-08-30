@@ -1,7 +1,7 @@
 // mcpctl — MCP Orchestrator CLI
 //
 // Talks to the orchestrator's REST API at /api/v1/* over the unified
-// TLS+ext_authz gateway (port 30443 by default in v1.6.0+).
+// TLS+ext_authz gateway (port 30444 by default in v1.6.0+).
 //
 // Authentication: POST /api/v1/auth/login returns a JWT; we save it in
 // ~/.mcpctl.json and send it as Bearer on every subsequent request.
@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-const version = "2.0.6"
+const version = "3.0.0"
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -460,11 +460,11 @@ func cmdLogin(gf globalFlags, args []string) {
 	if len(args) < 3 {
 		fmt.Println("Usage: mcpctl login <server-url> <username> <password>")
 		fmt.Println("       mcpctl login <server-url> --token <service-account-token>")
-		fmt.Println("Example: mcpctl login https://localhost:30443 admin admin --insecure")
-		fmt.Println("         mcpctl login https://localhost:30443 --token eyJhbGc... --insecure")
+		fmt.Println("Example: mcpctl login https://localhost:30444 admin admin --insecure")
+		fmt.Println("         mcpctl login https://localhost:30444 --token eyJhbGc... --insecure")
 		fmt.Println()
 		fmt.Println("Notes:")
-		fmt.Println("  Default Magertron gateway is HTTPS on port 30443.")
+		fmt.Println("  Default Magertron gateway is HTTPS on port 30444.")
 		fmt.Println("  Use --insecure (or -k) for self-signed certs (typical for fresh helm installs).")
 		fmt.Println("  Use --ca-cert <path> to pin a CA bundle.")
 		os.Exit(1)
@@ -1561,7 +1561,7 @@ GLOBAL FLAGS:
   --json                Emit JSON instead of tables (where applicable)
 
 CONNECTION:
-  login <url> <user> <pass>    Login to orchestrator (e.g. https://localhost:30443)
+  login <url> <user> <pass>    Login to orchestrator (e.g. https://localhost:30444)
   logout                       Clear saved credentials
   status                       Show connection status
 
@@ -1625,7 +1625,7 @@ OBSERVABILITY:
   audit [limit]                        View audit log
 
 EXAMPLES:
-  mcpctl login https://localhost:30443 admin admin --insecure
+  mcpctl login https://localhost:30444 admin admin --insecure
   mcpctl deploy fast-time mcp-prod ghcr.io/ibm/fast-time-server \
     --upstream-path /http --port 8080 --wait
   mcpctl servers --json | jq '.[] | select(.state=="Running")'
@@ -1648,12 +1648,14 @@ EXAMPLES:
   mcpctl users update-email alice alice@yourco.com
 
 NOTES:
-  Default Magertron gateway is HTTPS on port 30443 (TLS+ext_authz unified
+  Default Magertron gateway is HTTPS on port 30444 (TLS+ext_authz unified
   in v1.6.0). Plain HTTP listeners on 8080/30080 were removed in that
   release. Use --insecure for self-signed certs typical of fresh helm
   installs, or --ca-cert to pin the CA bundle.
 
-  mcpctl v2.x targets Magertron platform v2.x (sync-at-majors).
+  mcpctl v3.x is tested against Magertron platform v3.x. Older platform
+  versions may work and are not tested; if a command fails against one,
+  the platform version is the first thing to check.
   Some commands require Enterprise features (webhooks); the orchestrator
   will return a clear error if the feature isn't licensed.
 `, version)
