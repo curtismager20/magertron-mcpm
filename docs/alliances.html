@@ -63,6 +63,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+.ally-title {
+  background: linear-gradient(135deg, var(--accent-text), #a78bfa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
   --bg: #06080c; --bg-card: #0c1018; --bg-card-hover: #111820;
@@ -154,9 +159,9 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
   </div>
 </nav>
 
-<section style="padding:72px 0 24px;">
+<section style="padding:120px 0 24px;">
   <div class="container" style="max-width:820px;">
-    <h1 style="margin:0 0 12px; font-size:38px; letter-spacing:-0.02em;">Alliance Program</h1>
+    <h1 class="ally-title" style="margin:0 0 12px; font-size:38px; letter-spacing:-0.02em;">Alliance Program</h1>
     <p style="font-size:17px; line-height:1.7; color:var(--text-secondary); margin:0 0 8px;">
       Magertron governs what AI agents can reach — which tools, which data, under
       whose authority, with evidence that holds up afterwards. It is Kubernetes-native,
