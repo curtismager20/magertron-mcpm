@@ -1869,7 +1869,7 @@ probo:
 # scannerUrlOverride to point at your OWN scanner (Prisma/Snyk/etc.) instead —
 # the scan contract is scanner-agnostic.
 scanning:
-  enabled: true
+  enabled: false
 
   # Override to point the orchestrator at an EXTERNAL scanner instead of the
   # bundled adapter. Empty = use the bundled scanner-adapter service.
@@ -1881,7 +1881,7 @@ scanning:
   trivy:
     image:
       repository: aquasec/trivy
-      tag: "latest"
+      tag: "0.67.0"
       pullPolicy: IfNotPresent
     port: 4954
     # The vuln DB is ~900MB. emptyDir re-downloads on pod restart; enable
@@ -1901,7 +1901,7 @@ scanning:
   adapter:
     image:
       repository: curtismager20/scanner-adapter
-      tag: "0.1.0"
+      tag: "0.2.0"
       pullPolicy: IfNotPresent
     port: 8080
     replicaCount: 1
