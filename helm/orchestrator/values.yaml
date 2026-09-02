@@ -890,7 +890,7 @@ envoy:
   replicaCount: 2
   image:
     repository: envoyproxy/envoy
-    tag: v1.33-latest
+    tag: distroless-v1.33.14
   # ⚠️ limits.cpu: 4 — kept in LOCKSTEP with envoyV3.resources.limits.cpu.
   # (2026-07-17)
   #
