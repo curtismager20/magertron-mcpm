@@ -1278,7 +1278,7 @@ postgresql:
   enabled: true
   image:
     repository: postgres
-    tag: 16-alpine
+    tag: 17-alpine
   # Postgres pod placement. Pinned to the control-plane node so the local-path
   # PV stays physically co-located with the pod across reschedules (k3s
   # local-path is node-local; an unpinned postgres that reschedules to another
@@ -1580,7 +1580,7 @@ inventory:
     enabled: true
     image:
       repository: postgres
-      tag: 16-alpine
+      tag: 17-alpine
     nodeSelector:
       node-role.kubernetes.io/control-plane: "true"
     tolerations: []
