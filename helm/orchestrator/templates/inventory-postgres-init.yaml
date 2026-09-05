@@ -105,19 +105,26 @@ data:
     -- ── inventory_agents ─────────────────────────────────────────────────────
     -- Per-agent liveness state. Upserted on every observation batch +
     -- heartbeat. Used later for "agents that stopped reporting" alerting.
+    -- One row per (token subject, device) — migration 012. A token shared
+    -- across a fleet must list every device, not one row they all overwrite.
     CREATE TABLE IF NOT EXISTS inventory_agents (
-        agent_id                TEXT PRIMARY KEY,
+        agent_id                TEXT NOT NULL,
         host_id                 TEXT NOT NULL,
         host_os                 TEXT,
         host_os_version         TEXT,
         agent_version           TEXT,
         first_seen_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_seen_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-        last_observation_count  INTEGER DEFAULT 0
+        last_observation_count  INTEGER DEFAULT 0,
+        hostname                TEXT,
+        claimed_user            TEXT,
+        PRIMARY KEY (agent_id, host_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_agents_last_seen
         ON inventory_agents(last_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_agents_agent_last_seen
+        ON inventory_agents(agent_id, last_seen_at DESC);
 
     -- ── inventory_source_state ───────────────────────────────────────────────
     -- Per-source poll bookmarks. Endpoint agents push (don't get polled),
