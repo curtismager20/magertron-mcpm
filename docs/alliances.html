@@ -207,6 +207,24 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
     </div>
 
     <div style="border-top:1px solid var(--border); padding-top:32px; margin-bottom:32px;">
+      <h2 style="margin:0 0 8px; font-size:21px;">Endpoint management platforms</h2>
+      <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0 0 12px;">
+        Every MCP server starts as a file on a laptop. Magertron reads those files
+        through the MDM an enterprise already runs — Jamf Pro, Microsoft Intune,
+        Kandji — and matches what it finds to the governed registry.
+      </p>
+      <ul style="font-size:15px; line-height:1.9; color:var(--text-secondary); margin:0 0 12px; padding-left:20px;">
+        <li>A policy script and an extension attribute; no agent on the endpoint</li>
+        <li>Three postures set by the administrator: <strong>Observe</strong>, <strong>Advise</strong>, or <strong>Enforce</strong> at next check-in</li>
+      </ul>
+      <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0;">
+        Ships today as a script plus scheduler for Linux and macOS, with Ansible
+        delivery; Jamf Pro and Intune packaging in progress. Any MDM that can run
+        a signed script and report its output works the same way.
+      </p>
+    </div>
+
+    <div style="border-top:1px solid var(--border); padding-top:32px; margin-bottom:32px;">
       <h2 style="margin:0 0 8px; font-size:21px;">Resellers and distributors</h2>
       <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0;">
         For partners taking enterprise infrastructure to market through existing
@@ -303,6 +321,7 @@ textarea.ally-input { min-height: 104px; resize: vertical; }
         <select class="ally-input" id="ally-type">
           <option value="System integrator">System integrator or consultancy</option>
           <option value="Technology">Technology partner</option>
+          <option value="Endpoint management">Endpoint management platform</option>
           <option value="Reseller">Reseller or distributor</option>
           <option value="Not sure">Not sure yet</option>
         </select>
