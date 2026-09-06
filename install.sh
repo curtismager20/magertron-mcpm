@@ -46,6 +46,8 @@
 #
 # Why both modes run helm uninstall + resource cleanup:
 # the orchestrator creates NetworkPolicies named mcp-server-isolation outside
+
+
 # of helm's ownership. On `helm upgrade --install` these collide with helm's
 # ownership-validation logic and the upgrade fails ("invalid ownership
 # metadata"). The clean uninstall + resource cleanup + fresh install dance
@@ -398,6 +400,31 @@ ENABLE_OLLAMA="${ENABLE_OLLAMA:-0}"
 UC_OBSERVE="${UC_OBSERVE:-0}"
 HELM_REPO_NAME="${HELM_REPO_NAME:-magertron}"
 RELEASE_NAME="${RELEASE_NAME:-mcp}"
+
+# ── adopt_orchestrator_netpols ───────────────────────────────────────────────
+# ⚠ The orchestrator creates mcp-server-isolation at runtime so namespaces made
+# after install are covered. The chart creates the same policy. When the
+# orchestrator got there first, Helm refuses to adopt it and the whole install
+# fails on ownership metadata — which is what happens on every REinstall over a
+# cluster that has been running.
+#
+# ⚠ We stamp Helm's metadata onto the EXISTING object rather than changing what
+# the orchestrator writes: that label is also the policy's podSelector, so
+# altering it would change which pods are isolated. This touches ownership only.
+adopt_orchestrator_netpols() {
+  local ns
+  for ns in $(kubectl get networkpolicy -A \
+                -o jsonpath='{range .items[?(@.metadata.name=="mcp-server-isolation")]}{.metadata.namespace}{"\n"}{end}' \
+                2>/dev/null); do
+    kubectl label   networkpolicy mcp-server-isolation -n "$ns" \
+      "app.kubernetes.io/managed-by=Helm" --overwrite >/dev/null 2>&1 || true
+    kubectl annotate networkpolicy mcp-server-isolation -n "$ns" \
+      "meta.helm.sh/release-name=${RELEASE_NAME:-mcp}" \
+      "meta.helm.sh/release-namespace=${NAMESPACE:-mcp-system}" \
+      --overwrite >/dev/null 2>&1 || true
+  done
+}
+adopt_orchestrator_netpols
 
 usage() {
     cat <<'EOF'
