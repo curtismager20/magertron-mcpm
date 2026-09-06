@@ -860,7 +860,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 <!-- Showcase: Server Management -->
 <section style="padding:80px 0; border-top: 1px solid var(--border);">
   <div class="container" style="max-width:1200px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:start;">
       <div>
         <div class="section-label">Enterprise Security</div>
         <h2 class="section-title">Rogue MCP servers are already inside your network</h2>
@@ -871,7 +871,8 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         </a>
       </div>
 
-      <!-- Tabbed threat model -->
+      <!-- Tabbed threat model + fleet devices screenshot -->
+      <div>
       <div class="threat-tabs">
         <div class="threat-tab-buttons" role="tablist">
           <button class="threat-tab-btn active" data-tab="tv01" role="tab" aria-selected="true">
@@ -905,6 +906,10 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
           <div style="font-size:17px;font-weight:600;margin-bottom:8px;">Three enforcement layers</div>
           <div style="font-size:14px;color:var(--text-secondary);line-height:1.6;">Perimeter firewall handles external agents. Internal network policy stops pod-to-pod lateral movement. Kubernetes NetworkPolicy isolates MCP server namespaces automatically. All three applied by default on every install.</div>
         </div>
+      </div>
+      <div class="showcase-image" style="margin-top:20px;">
+        <img src="screenshots/inventory-scan.png" alt="Magertron fleet devices — one integration token, four endpoints across macOS, Linux and Windows reporting their MCP client configs, with delivery method and last check-in per device">
+      </div>
       </div>
     </div>
   </div>
@@ -1400,18 +1405,6 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 </section>
 
 <!-- CTA -->
-<section class="cta" id="contact">
-  <div class="container">
-    <div class="cta-box">
-      <h2>Ready to manage AI<br>at enterprise scale?</h2>
-      <p>Install it yourself from GitHub, or ask for a live instance and we'll send you one today.</p>
-      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
-        <a href="#" class="btn-primary" onclick="openDemoModal(event)">Try it now → </a>
-        <a href="https://github.com/magertron/orchestrator" target="_blank" class="btn-secondary">View on GitHub →</a>
-      </div>
-    </div>
-  </div>
-</section>
 
 <!-- Footer -->
 <footer>
