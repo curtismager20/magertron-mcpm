@@ -141,8 +141,9 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px; }
 .modal-overlay.open { display: flex; }
-.ally-band { padding: 40px 0; }
-.ally-band.alt { background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.ally-band { padding: 8px 0; }
+.ally-band > .container { padding-top: 32px; padding-bottom: 32px; }
+.ally-band.alt > .container { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding-left: 34px; padding-right: 34px; }
 .ally-band h2 { margin: 0 0 8px; font-size: 21px; }
 </style>
 </head>
