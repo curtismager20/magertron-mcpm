@@ -141,6 +141,9 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
 
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px; }
 .modal-overlay.open { display: flex; }
+.ally-band { padding: 40px 0; }
+.ally-band.alt { background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.ally-band h2 { margin: 0 0 8px; font-size: 21px; }
 </style>
 </head>
 <body>
@@ -159,7 +162,7 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
   </div>
 </nav>
 
-<section style="padding:120px 0 24px;">
+<section style="padding:120px 0 8px;">
   <div class="container" style="max-width:820px;">
     <h1 class="ally-title" style="margin:0 0 12px; font-size:38px; letter-spacing:-0.02em;">Alliance Program</h1>
     <p style="font-size:17px; line-height:1.7; color:var(--text-secondary); margin:0 0 8px;">
@@ -175,10 +178,8 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
   </div>
 </section>
 
-<section style="padding:0 0 24px;">
+<section class="ally-band">
   <div class="container" style="max-width:820px;">
-
-    <div style="border-top:1px solid var(--border); padding-top:32px; margin-bottom:32px;">
       <h2 style="margin:0 0 8px; font-size:21px;">System integrators and consultancies</h2>
       <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0 0 12px;">
         You are in the room when an enterprise asks how it will govern the agents
@@ -190,9 +191,11 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         <li>A live instance for your team to work in</li>
         <li>Commercial terms agreed per engagement</li>
       </ul>
-    </div>
+  </div>
+</section>
 
-    <div style="border-top:1px solid var(--border); padding-top:32px; margin-bottom:32px;">
+<section class="ally-band alt">
+  <div class="container" style="max-width:820px;">
       <h2 style="margin:0 0 8px; font-size:21px;">Technology partners</h2>
       <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0 0 12px;">
         Magertron sits at the call path and holds the record of what every agent
@@ -204,9 +207,11 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         <li>An instance to build against</li>
         <li>Joint architecture review, and a named contact</li>
       </ul>
-    </div>
+  </div>
+</section>
 
-    <div style="border-top:1px solid var(--border); padding-top:32px; margin-bottom:32px;">
+<section class="ally-band">
+  <div class="container" style="max-width:820px;">
       <h2 style="margin:0 0 8px; font-size:21px;">Endpoint management platforms</h2>
       <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0 0 12px;">
         Every MCP server starts as a file on a laptop. Magertron reads those files
@@ -222,27 +227,30 @@ footer { padding: 64px 0 32px; border-top: 1px solid var(--border); margin-top: 
         delivery; Jamf Pro and Intune packaging in progress. Any MDM that can run
         a signed script and report its output works the same way.
       </p>
-    </div>
+  </div>
+</section>
 
-    <div style="border-top:1px solid var(--border); padding-top:32px; margin-bottom:32px;">
+<section class="ally-band alt">
+  <div class="container" style="max-width:820px;">
       <h2 style="margin:0 0 8px; font-size:21px;">Resellers and distributors</h2>
       <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0;">
         For partners taking enterprise infrastructure to market through existing
         commercial relationships. Terms agreed directly.
       </p>
-    </div>
+  </div>
+</section>
 
-    <div style="border-top:1px solid var(--border); padding-top:32px;">
+<section class="ally-band">
+  <div class="container" style="max-width:820px;">
       <h2 style="margin:0 0 8px; font-size:21px;">What we ask</h2>
       <p style="font-size:15px; line-height:1.7; color:var(--text-secondary); margin:0;">
         That you run it before you represent it. Every partner starts with a live
         instance and a deployment of their own — an afternoon, and the difference
         between a partnership and a logo on a page.
       </p>
-    </div>
-
   </div>
 </section>
+
 
 <style>
 /* ⚠ Light fields on a dark shell. Default inputs here render as near-black on
@@ -418,8 +426,7 @@ function submitAllianceForm() {
           <li><a href="siem-integration.html">SIEM Integration</a></li>
           <li><a href="agentcore-comparison.html">AI Orchestrator vs. AWS AgentCore</a></li>
           <li><a href="cloudflare-comparison.html">AI Orchestrator vs. Cloudflare</a></li>
-          <li><a href="/vscode/">VS Code</a><span style="color: var(--text-tertiary); padding: 0 6px;">&middot;</span><a href="/claude-code/">Claude Code</a></li>
-          <li><a href="/cursor/">Cursor</a></li>
+          <li style="white-space: nowrap;"><a href="/vscode/">VS Code</a><span style="color: var(--text-tertiary); padding: 0 6px;">&middot;</span><a href="/claude-code/">Claude Code</a><span style="color: var(--text-tertiary); padding: 0 6px;">&middot;</span><a href="/cursor/">Cursor</a></li>
         </ul>
       </div>
       <div class="footer-col">
